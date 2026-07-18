@@ -39,6 +39,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            release/**/*.exe
-            release/*.zip
+            release/Soundpad Quick Cut Setup v*.exe
+            release/Soundpad-Quick-Cut-portable.zip
           generate_release_notes: true
