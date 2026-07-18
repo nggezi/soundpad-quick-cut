@@ -1,0 +1,75 @@
+{
+    "name":  "soundpad-quick-cut",
+"version": "1.7.0",
+    "description":  "Quick audio cutter for Soundpad - import video, trim, export audio",
+    "main":  "dist/main/main/index.js",
+    "scripts":  {
+                    "dev":  "concurrently -k -n VITE,ELECTRON -c blue,green \"npm:dev:vite\" \"npm:dev:electron\"",
+                    "dev:vite":  "vite",
+                    "dev:electron":  "wait-on tcp:5173 \u0026\u0026 npm run build:main \u0026\u0026 cross-env NODE_ENV=development electron .",
+                    "build:main":  "tsc -p tsconfig.node.json",
+                    "build":  "npm run build:main \u0026\u0026 tsc \u0026\u0026 vite build",
+                    "preview":  "vite preview",
+                    "start":  "npm run build:main \u0026\u0026 electron .",
+                    "pack":  "npm run build \u0026\u0026 electron-builder --dir",
+                    "dist":  "npm run build \u0026\u0026 electron-builder"
+                },
+    "author":  "",
+    "license":  "MIT",
+    "devDependencies":  {
+                            "@types/node":  "^22.10.0",
+                            "@types/react":  "^18.3.12",
+                            "@types/react-dom":  "^18.3.1",
+                            "@vitejs/plugin-react":  "^4.3.4",
+                            "concurrently":  "^9.1.0",
+                            "cross-env":  "^7.0.3",
+                            "electron":  "^33.2.0",
+                            "electron-builder":  "^26.15.3",
+                            "typescript":  "^5.7.2",
+                            "vite":  "^5.4.11",
+                            "wait-on":  "^8.0.1"
+                        },
+    "dependencies":  {
+                         "ffmpeg-static":  "^5.2.0",
+                         "ffprobe-static":  "^3.1.0",
+                         "react":  "^18.3.1",
+                         "react-dom":  "^18.3.1"
+                     },
+    "build":  {
+                  "appId":  "com.soundpad.quickcut",
+                  "productName":  "Soundpad Quick Cut",
+                  "directories":  {
+                                      "output":  "release"
+                                  },
+                  "files":  [
+                                "dist/**/*",
+                                "package.json"
+                            ],
+                  "win":  {
+                              "target":  [
+                                             {
+                                                 "target":  "nsis",
+                                                 "arch":  [
+                                                              "x64"
+                                                          ]
+                                             }
+                                         ],
+                              "icon":  "build/icon.ico"
+                          },
+                  "nsis":  {
+                               "oneClick":  false,
+                               "perMachine":  false,
+                               "allowToChangeInstallationDirectory":  true,
+                               "deleteAppDataOnUninstall":  true,
+                               "createDesktopShortcut":  true,
+                               "createStartMenuShortcut":  true,
+                               "shortcutName":  "Soundpad Quick Cut",
+                               "artifactName": "Soundpad Quick Cut Setup v${version}.exe"
+                           },
+                  "asar":  true,
+                  "asarUnpack":  [
+                                     "node_modules/ffmpeg-static/**",
+                                     "node_modules/ffprobe-static/**"
+                                 ]
+              }
+}
