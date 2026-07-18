@@ -28,10 +28,16 @@ jobs:
       - name: Package installer
         run: npx electron-builder --win --x64
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+      - name: Zip portable
+        run: Compress-Archive -Path release\win-unpacked\* -DestinationPath release\Soundpad-Quick-Cut-portable.zip
+
+      - name: List artifacts
+        run: Get-ChildItem release -Filter *.exe,*.zip | Select-Object Name
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
         with:
-          name: Soundpad-Quick-Cut
-          path: |
-            release/*.exe
-            release/win-unpacked/**
+          files: |
+            release/Soundpad Quick Cut Setup v*.exe
+            release/Soundpad-Quick-Cut-portable.zip
+          generate_release_notes: true
