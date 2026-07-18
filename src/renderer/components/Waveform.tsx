@@ -108,17 +108,17 @@ export const Waveform: React.FC<Props> = ({
     ctx.scale(dpr, dpr);
     const w = rect.width, h = rect.height;
     ctx.clearRect(0, 0, w, h);
-    ctx.fillStyle = "#0f1115";
+    ctx.fillStyle = "#080b12";
     ctx.fillRect(0, 0, w, h);
 
     const p = pts.current, d = durRef.current;
     if (loading) {
-      ctx.fillStyle = "#4f8cff"; ctx.font = "13px sans-serif";
+      ctx.fillStyle = "#7c3aed"; ctx.font = "13px sans-serif";
       ctx.textAlign = "center"; ctx.fillText("正在提取音频波形...", w / 2, h / 2);
       return;
     }
     if (p.length === 0 || d === 0) {
-      ctx.fillStyle = "#3a4150"; ctx.font = "12px sans-serif";
+      ctx.fillStyle = "#4a5670"; ctx.font = "12px sans-serif";
       ctx.textAlign = "center"; ctx.fillText("无音频波形", w / 2, h / 2);
       return;
     }
@@ -127,14 +127,16 @@ export const Waveform: React.FC<Props> = ({
     if (vw <= 0) return;
     const ve = vs + vw, pl = p.length, mid = h / 2;
     const bw = Math.max(1, w / pl - 0.5);
-    ctx.fillStyle = "#4f8cff";
     for (let i = 0; i < pl; i++) {
       const pt = p[i];
       if (pt.t < vs || pt.t > ve) continue;
       const amp = Math.max(0.02, Math.abs(pt.max - pt.min));
+      if (amp < 0.1) ctx.fillStyle = "#6366f1";
+      else if (amp < 0.4) ctx.fillStyle = "#22d3ee";
+      else ctx.fillStyle = "#facc15";
       ctx.fillRect(((pt.t - vs) / vw) * w, mid - amp * (h * 0.45), bw, amp * (h * 0.45) * 2);
     }
-    ctx.fillStyle = "#3a4150"; ctx.font = "10px monospace"; ctx.textAlign = "center";
+    ctx.fillStyle = "#4a5670"; ctx.font = "10px monospace"; ctx.textAlign = "center";
     const ti = vw > 30 ? 5 : vw > 10 ? 2 : vw > 5 ? 1 : 0.5;
     for (let t = Math.ceil(vs / ti) * ti; t <= ve; t += ti) {
       const x = ((t - vs) / vw) * w;
@@ -155,25 +157,27 @@ export const Waveform: React.FC<Props> = ({
     ctx.scale(dpr, dpr);
     const w = rect.width, h = rect.height;
     ctx.clearRect(0, 0, w, h);
-    ctx.fillStyle = "#1d212c"; ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = "#0e1220"; ctx.fillRect(0, 0, w, h);
     const p = pts.current, d = durRef.current;
     if (p.length === 0 || d === 0) return;
     const pl = p.length, mid = h / 2;
-    ctx.fillStyle = "#2a3040";
     for (let i = 0; i < pl; i++) {
       const pt = p[i];
       const amp = Math.max(0.02, Math.abs(pt.max - pt.min));
+      if (amp < 0.1) ctx.fillStyle = "#6366f1";
+      else if (amp < 0.4) ctx.fillStyle = "#22d3ee";
+      else ctx.fillStyle = "#facc15";
       ctx.fillRect((pt.t / d) * w, mid - amp * (h * 0.4), Math.max(0.5, w / pl - 0.5), amp * (h * 0.8));
     }
     const ii = ipt.current, oo = opt.current;
     if (ii !== null && oo !== null) {
-      ctx.fillStyle = "rgba(79,140,255,0.3)";
+      ctx.fillStyle = "rgba(124,58,237,0.25)";
       ctx.fillRect((ii / d) * w, 0, ((oo - ii) / d) * w, h);
     }
     const vs = vsRef.current, vw = vwRef.current;
-    ctx.strokeStyle = "#4f8cff";
+    ctx.strokeStyle = "#7c3aed";
     ctx.strokeRect((vs / d) * w, 1, (vw / d) * w, h - 2);
-    ctx.fillStyle = "#ffd23f";
+    ctx.fillStyle = "#facc15";
     ctx.fillRect((ph.current / d) * w - 1, 0, 2, h);
   }, []);
 

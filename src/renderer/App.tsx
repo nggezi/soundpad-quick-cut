@@ -260,7 +260,7 @@ export default function App() {
     <div className="app">
       <div className="topbar">
         <span className="title">Soundpad Quick Cut</span>
-        <button onClick={handleOpen} className="primary">+ 导入视频</button>
+        <button onClick={handleOpen} className="primary">导入视频</button>
         {videoPath && <span className="filename" title={videoPath}>{videoPath.replace(/\\/g, "/").split("/").pop()}</span>}
         <div className="spacer" />
         {materials.length > 0 && <span className="mat-count">{materials.length} 个素材</span>}
@@ -286,8 +286,8 @@ export default function App() {
           {!videoUrl ? (
             <div className="empty-state">
               <div className={"dropzone" + (dragOver ? " dragover" : "")}>
-                <div className="big">+</div>
-                <div>拖入视频文件，或点击上方"+ 导入视频"</div>
+                <div className="big"></div>
+                <div>拖入视频文件，或点击上方"导入视频"</div>
                 <div className="hint">MP4 / MKV / MOV / AVI / WebM</div>
               </div>
             </div>
@@ -324,9 +324,9 @@ export default function App() {
 
                 <div className="controls">
                   <div className="controls-left">
-                    <button className="io-btn in" onClick={setInHere}>入点 [I]</button>
-                    <button className="io-btn out" onClick={setOutHere}>出点 [O]</button>
-                    <button onClick={handlePreview} disabled={inPoint === null || outPoint === null}>预听 [P]</button>
+                    <button className="io-btn in" onClick={setInHere}>入点 <span className="kbd">I</span></button>
+                    <button className="io-btn out" onClick={setOutHere}>出点 <span className="kbd">O</span></button>
+                    <button onClick={handlePreview} disabled={inPoint === null || outPoint === null}>预听 <span className="kbd">P</span></button>
                     <button onClick={() => { setInPoint(null); setOutPoint(null); saveCurrent(); }}
                       disabled={inPoint === null && outPoint === null}>清除选区</button>
                   </div>
@@ -366,7 +366,7 @@ export default function App() {
       </div>
 
       {toast && <div className={"toast " + toast.kind}>{toast.msg}</div>}
-      {dragOver && (<div className="drag-overlay"><div className="drag-overlay-content"><div className="drag-overlay-icon">+</div><div>释放以导入视频文件</div></div></div>)}
+      {dragOver && (<div className="drag-overlay"><div className="drag-overlay-content"><div className="drag-overlay-icon"></div><div>释放以导入视频文件</div></div></div>)}
     </div>
   );
 }
