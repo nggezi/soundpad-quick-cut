@@ -4,10 +4,6 @@
 
 音频快剪工具。导入视频 → 拖拽波形选段 → 导出 WAV/MP3，专为 [Soundpad](https://www.soundpad.net/) 用户设计。
 
-## 截图
-
-![screenshot](https://github.com/user-attachments/assets/placeholder)
-
 ## 功能
 
 - 拖拽 / 按钮导入视频（MP4、MKV、MOV、AVI、WebM），支持多文件批量导入
