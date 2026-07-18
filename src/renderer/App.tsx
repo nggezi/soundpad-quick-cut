@@ -77,8 +77,8 @@ export default function App() {
 
   const saveCurrent = useCallback(() => {
     if (activeIdx === null || !pathRef.current) return;
-    updateMaterial(activeIdx, { probe, waveform, inPoint, outPoint, duration, path: pathRef.current, url: videoUrl! });
-  }, [activeIdx, probe, waveform, inPoint, outPoint, duration, videoUrl, updateMaterial]);
+    updateMaterial(activeIdx, { probe, waveform, inPoint: inRef.current, outPoint: outRef.current, duration: durRef.current, path: pathRef.current, url: videoUrl! });
+  }, [activeIdx, probe, waveform, videoUrl, updateMaterial]);
 
   // ---- Play helper: seek to inPoint if outside selection ----
   const playOrPause = useCallback(() => {
@@ -135,7 +135,11 @@ export default function App() {
   }, [materials, updateMaterial]);
 
   const removeMaterial = useCallback((idx: number) => {
-    setMaterials((prev) => prev.filter((_, i) => i !== idx));
+    setMaterials((prev) => {
+      const next = prev.filter((_, i) => i !== idx);
+      nextIdxRef.current = next.length; // keep counter in sync
+      return next;
+    });
     setActiveIdx((prev) => prev === null ? null : prev === idx ? null : prev > idx ? prev - 1 : prev);
   }, []);
 
@@ -165,11 +169,20 @@ export default function App() {
     let raf: number;
     const tick = () => { setCurrentTime(v.currentTime); if (outRef.current !== null && v.currentTime >= outRef.current) v.pause(); raf = requestAnimationFrame(tick); };
     const onMeta = () => { if (durRef.current === 0 && v.duration > 0) setDurationFn(v.duration); };
+    const onPlay = () => { setPlaying(true); raf = requestAnimationFrame(tick); };
+    const onPause = () => { setPlaying(false); cancelAnimationFrame(raf); };
+    const onEnded = () => { setPlaying(false); cancelAnimationFrame(raf); };
     v.addEventListener("loadedmetadata", onMeta);
-    v.addEventListener("play", () => { setPlaying(true); raf = requestAnimationFrame(tick); });
-    v.addEventListener("pause", () => { setPlaying(false); cancelAnimationFrame(raf); });
-    v.addEventListener("ended", () => { setPlaying(false); cancelAnimationFrame(raf); });
-    return () => { cancelAnimationFrame(raf); v.removeEventListener("loadedmetadata", onMeta); };
+    v.addEventListener("play", onPlay);
+    v.addEventListener("pause", onPause);
+    v.addEventListener("ended", onEnded);
+    return () => {
+      cancelAnimationFrame(raf);
+      v.removeEventListener("loadedmetadata", onMeta);
+      v.removeEventListener("play", onPlay);
+      v.removeEventListener("pause", onPause);
+      v.removeEventListener("ended", onEnded);
+    };
   }, [videoUrl]);
 
   const handleSeek = useCallback((t: number) => { const v = videoRef.current; if (v) v.currentTime = t; setCurrentTime(t); }, []);
@@ -234,10 +247,12 @@ export default function App() {
   const setOutRef = useRef(setOutHere); setOutRef.current = setOutHere;
   const previewRef = useRef(handlePreview); previewRef.current = handlePreview;
   const exportRef = useRef(handleExport); exportRef.current = handleExport;
+  const activeRef = useRef(activeIdx); activeRef.current = activeIdx;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
+      if (e.key === "Escape") { const idx = activeRef.current; if (idx !== null) updateMaterial(idx, { inPoint: null, outPoint: null }); return; }
       const v = videoRef.current; if (!v) return;
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "e") { e.preventDefault(); exportRef.current(); return; }
       switch (e.key.toLowerCase()) {
@@ -327,7 +342,7 @@ export default function App() {
                     <button className="io-btn in" onClick={setInHere}>入点 <span className="kbd">I</span></button>
                     <button className="io-btn out" onClick={setOutHere}>出点 <span className="kbd">O</span></button>
                     <button onClick={handlePreview} disabled={inPoint === null || outPoint === null}>预听 <span className="kbd">P</span></button>
-                    <button onClick={() => { setInPoint(null); setOutPoint(null); saveCurrent(); }}
+                    <button onClick={() => { if (activeIdx !== null) updateMaterial(activeIdx, { inPoint: null, outPoint: null }); }}
                       disabled={inPoint === null && outPoint === null}>清除选区</button>
                   </div>
                   <div className="controls-right">

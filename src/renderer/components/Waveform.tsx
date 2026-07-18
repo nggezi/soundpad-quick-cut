@@ -113,7 +113,7 @@ export const Waveform: React.FC<Props> = ({
 
     const p = pts.current, d = durRef.current;
     if (loading) {
-      ctx.fillStyle = "#7c3aed"; ctx.font = "13px sans-serif";
+      ctx.fillStyle = "#539bf5"; ctx.font = "13px sans-serif";
       ctx.textAlign = "center"; ctx.fillText("正在提取音频波形...", w / 2, h / 2);
       return;
     }
@@ -131,9 +131,7 @@ export const Waveform: React.FC<Props> = ({
       const pt = p[i];
       if (pt.t < vs || pt.t > ve) continue;
       const amp = Math.max(0.02, Math.abs(pt.max - pt.min));
-      if (amp < 0.1) ctx.fillStyle = "#6366f1";
-      else if (amp < 0.4) ctx.fillStyle = "#22d3ee";
-      else ctx.fillStyle = "#facc15";
+      ctx.fillStyle = "#539bf5";
       ctx.fillRect(((pt.t - vs) / vw) * w, mid - amp * (h * 0.45), bw, amp * (h * 0.45) * 2);
     }
     ctx.fillStyle = "#4a5670"; ctx.font = "10px monospace"; ctx.textAlign = "center";
@@ -164,9 +162,7 @@ export const Waveform: React.FC<Props> = ({
     for (let i = 0; i < pl; i++) {
       const pt = p[i];
       const amp = Math.max(0.02, Math.abs(pt.max - pt.min));
-      if (amp < 0.1) ctx.fillStyle = "#6366f1";
-      else if (amp < 0.4) ctx.fillStyle = "#22d3ee";
-      else ctx.fillStyle = "#facc15";
+      ctx.fillStyle = "#539bf5";
       ctx.fillRect((pt.t / d) * w, mid - amp * (h * 0.4), Math.max(0.5, w / pl - 0.5), amp * (h * 0.8));
     }
     const ii = ipt.current, oo = opt.current;
@@ -175,9 +171,9 @@ export const Waveform: React.FC<Props> = ({
       ctx.fillRect((ii / d) * w, 0, ((oo - ii) / d) * w, h);
     }
     const vs = vsRef.current, vw = vwRef.current;
-    ctx.strokeStyle = "#7c3aed";
+    ctx.strokeStyle = "#539bf5";
     ctx.strokeRect((vs / d) * w, 1, (vw / d) * w, h - 2);
-    ctx.fillStyle = "#facc15";
+    ctx.fillStyle = "#e2e8f0";
     ctx.fillRect((ph.current / d) * w - 1, 0, 2, h);
   }, []);
 
