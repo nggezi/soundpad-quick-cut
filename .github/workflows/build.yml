@@ -9,35 +9,34 @@ jobs:
   build:
     runs-on: windows-latest
 
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: false
+
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
 
-      - name: Install dependencies
+      - name: Install
         run: npm ci
 
       - name: Build
         run: npm run build
 
       - name: Package portable
-        run: npx electron-builder --dir --win --x64
+        run: npx electron-builder --dir --win --x64 --publish=never
 
       - name: Package installer
-        run: npx electron-builder --win --x64
+        run: npx electron-builder --win --x64 --publish=never
 
       - name: Zip portable
         run: Compress-Archive -Path release\win-unpacked\* -DestinationPath release\Soundpad-Quick-Cut-portable.zip
-
-      - name: List artifacts
-        run: Get-ChildItem release -Filter *.exe,*.zip | Select-Object Name
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            release/Soundpad Quick Cut Setup v*.exe
-            release/Soundpad-Quick-Cut-portable.zip
+            release/**/*.exe
+            release/*.zip
           generate_release_notes: true
