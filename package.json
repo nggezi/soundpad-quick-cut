@@ -15,7 +15,7 @@
                     "dist":  "npm run build \u0026\u0026 electron-builder"
                 },
     "author":  "",
-    "license":  "MIT",
+"license": "CC-BY-NC-ND-4.0",
     "devDependencies":  {
                             "@types/node":  "^22.10.0",
                             "@types/react":  "^18.3.12",
