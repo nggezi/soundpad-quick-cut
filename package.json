@@ -1,6 +1,6 @@
 {
   "name": "soundpad-quick-cut",
-  "version": "1.7.0",
+  "version": "1.8.0",
   "description": "Quick audio cutter for Soundpad - import video, trim, export audio",
   "main": "dist/main/main/index.js",
   "author": "nggezi",
