@@ -1,20 +1,27 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 import type { ExportOptions, ExportProgress } from "../shared/types.js";
+import type { SoundpadQuickCutApi } from "../shared/api.js";
 
-// ---- Drag & drop: intercept in preload context ----
-// Electron 28+ removed File.path. We must use webUtils.getPathForFile()
-// BEFORE the File object leaves the preload context (contextBridge proxies
-// lose the native file handle). So we intercept the drop event here,
-// extract the path, and pass it to the renderer via a callback.
-
+// Electron 28+ removed File.path; resolve dropped-file paths here via
+// webUtils before the File objects leave the preload context.
 let onFileDrop: ((paths: string[]) => void) | null = null;
 
-document.addEventListener("dragover", (e) => { e.preventDefault(); e.stopPropagation(); }, true);
+document.addEventListener(
+  "dragover",
+  (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+  },
+  true,
+);
 
-document.addEventListener("drop", (e) => {
-  e.preventDefault(); e.stopPropagation();
-  const files = e.dataTransfer?.files;
-  if (files && files.length > 0 && onFileDrop) {
+document.addEventListener(
+  "drop",
+  (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const files = e.dataTransfer?.files;
+    if (!files || files.length === 0 || !onFileDrop) return;
     try {
       const paths: string[] = [];
       for (let i = 0; i < files.length; i++) {
@@ -22,34 +29,31 @@ document.addEventListener("drop", (e) => {
         if (p) paths.push(p);
       }
       if (paths.length > 0) onFileDrop(paths);
-    } catch (err) { console.error("[preload] getPathForFile error:", err); }
-  }
-}, true);
+    } catch (err) {
+      console.error("[preload] getPathForFile error:", err);
+    }
+  },
+  true,
+);
 
-// ---- Expose API to renderer ----
-contextBridge.exposeInMainWorld("api", {
-  // File dialog
+const api: SoundpadQuickCutApi = {
   openVideo: () => ipcRenderer.invoke("dialog:openVideo"),
   saveAudio: (defaultName: string) => ipcRenderer.invoke("dialog:saveAudio", defaultName),
-
-  // FFmpeg operations
+  tempAudioPath: (fileName: string) => ipcRenderer.invoke("dialog:tempAudioPath", fileName),
   probe: (filePath: string) => ipcRenderer.invoke("ffmpeg:probe", filePath),
-  waveform: (filePath: string, samples: number) => ipcRenderer.invoke("ffmpeg:waveform", filePath, samples),
+  waveform: (filePath: string, samples: number, durationHint?: number) =>
+    ipcRenderer.invoke("ffmpeg:waveform", filePath, samples, durationHint),
   exportAudio: (opts: ExportOptions) => ipcRenderer.invoke("ffmpeg:export", opts),
-
-  // Export progress subscription
-  onExportProgress: (cb: (p: ExportProgress) => void) => {
+  onExportProgress: (cb) => {
     const handler = (_e: unknown, p: ExportProgress) => cb(p);
     ipcRenderer.on("ffmpeg:exportProgress", handler);
     return () => ipcRenderer.removeListener("ffmpeg:exportProgress", handler);
   },
-
-  // Shell
   showInFolder: (filePath: string) => ipcRenderer.invoke("shell:showInFolder", filePath),
-
-  // Soundpad integration
   addToSoundpad: (filePath: string, category?: string) => ipcRenderer.invoke("soundpad:add", filePath, category),
+  onFileDropped: (cb: (paths: string[]) => void) => {
+    onFileDrop = cb;
+  },
+};
 
-  // Drag & drop: register a callback for dropped files
-  onFileDropped: (cb: (paths: string[]) => void) => { onFileDrop = cb; },
-});
+contextBridge.exposeInMainWorld("api", api);

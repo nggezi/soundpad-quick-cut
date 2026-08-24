@@ -33,12 +33,16 @@ jobs:
         run: npx electron-builder --win --x64 --publish=never
 
       - name: Zip portable
-        run: Compress-Archive -Path release\win-unpacked\* -DestinationPath release\Soundpad-Quick-Cut-portable.zip
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $ver = $tag.TrimStart('v')
+          Compress-Archive -Path release\win-unpacked\* -DestinationPath "release\Soundpad Quick Cut v$ver-portable.zip"
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             release/Soundpad Quick Cut Setup v*.exe
-            release/Soundpad-Quick-Cut-portable.zip
+            release/Soundpad Quick Cut v*.zip
           generate_release_notes: true

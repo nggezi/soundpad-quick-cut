@@ -1,40 +1,43 @@
-﻿import ffmpegStatic from "ffmpeg-static";
+import ffmpegStatic from "ffmpeg-static";
 import ffprobeStatic from "ffprobe-static";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
-import type { ProbeResult, WaveformPoint, ExportOptions, ExportProgress } from "../shared/types.js";
+import type {
+  ExportOptions,
+  ExportProgress,
+  ProbeResult,
+  WaveformPoint,
+} from "../shared/types.js";
 
-// ========== Resolve binary paths ==========
-// In packaged Electron apps, native binaries must be in app.asar.unpacked,
-// not inside the asar archive. Electron's ASAR virtual FS makes existsSync
-// return true for asar paths, but spawn() fails at runtime.
-// Solution: always check for unpacked path first.
+// ========== Binary resolution ==========
+// In packaged apps the binaries live in app.asar.unpacked (Electron cannot
+// spawn executables from inside the asar archive), so prefer that path.
 
-function resolvePath(raw: string): string {
+function resolveBinary(raw: string): string {
   if (!raw) return raw;
-  // Always try the unpacked version first (packaged app)
   const unpacked = raw.replace("app.asar", "app.asar.unpacked");
   if (fs.existsSync(unpacked)) return unpacked;
-  // Fall back to the original path (dev mode)
   if (fs.existsSync(raw)) return raw;
-  // Return original as last resort
   return raw;
 }
 
-const ffmpegRaw = (ffmpegStatic as string) || "ffmpeg";
-const ffprobeRaw = (ffprobeStatic as any)?.path || "ffprobe";
+const ffmpegPath = resolveBinary((ffmpegStatic as string) || "ffmpeg");
+const ffprobePath = resolveBinary((ffprobeStatic as any)?.path || "ffprobe");
 
-const ffmpegPath = resolvePath(ffmpegRaw);
-const ffprobePath = resolvePath(ffprobeRaw);
+console.log("[ffmpeg] ffmpeg:", ffmpegPath);
+console.log("[ffmpeg] ffprobe:", ffprobePath);
 
-console.log("[ffmpeg-service] ffmpeg (raw):", ffmpegRaw);
-console.log("[ffmpeg-service] ffmpeg (resolved):", ffmpegPath);
-console.log("[ffmpeg-service] ffprobe (raw):", ffprobeRaw);
-console.log("[ffmpeg-service] ffprobe (resolved):", ffprobePath);
+// ========== Helpers ==========
 
-// ========== Helper: run command ==========
+function clamp(v: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, v));
+}
 
-function runCmd(cmd: string, args: string[], timeoutMs = 30000): Promise<{ stdout: string; stderr: string; code: number | null }> {
+function runCmd(
+  cmd: string,
+  args: string[],
+  timeoutMs = 30000,
+): Promise<{ stdout: string; stderr: string; code: number | null }> {
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, { windowsHide: true });
     let stdout = "";
@@ -47,7 +50,6 @@ function runCmd(cmd: string, args: string[], timeoutMs = 30000): Promise<{ stdou
     child.stderr.on("data", (d) => (stderr += d.toString()));
     child.on("error", (err) => {
       clearTimeout(timer);
-      console.error("[runCmd] error:", err.message);
       reject(err);
     });
     child.on("close", (code) => {
@@ -57,24 +59,31 @@ function runCmd(cmd: string, args: string[], timeoutMs = 30000): Promise<{ stdou
   });
 }
 
+function evalFps(expr: string): number | undefined {
+  const [a, b] = expr.split("/").map(Number);
+  if (!b || !isFinite(a / b)) return undefined;
+  return a / b;
+}
+
 // ========== Probe ==========
 
 export async function probeMedia(filePath: string): Promise<ProbeResult> {
-  console.log("[probe] file:", filePath);
-  const args = ["-v", "error", "-print_format", "json", "-show_format", "-show_streams", filePath];
-  const { stdout, stderr, code } = await runCmd(ffprobePath, args);
-  console.log("[probe] exit:", code);
+  const { stdout, stderr, code } = await runCmd(ffprobePath, [
+    "-v", "error",
+    "-print_format", "json",
+    "-show_format",
+    "-show_streams",
+    filePath,
+  ]);
   if (code !== 0) {
-    console.error("[probe] stderr:", stderr.slice(0, 500));
-    throw new Error(`ffprobe failed (exit ${code}): ${stderr.slice(0, 200)}`);
+    throw new Error(`ffprobe failed (exit ${code}): ${stderr.slice(0, 300) || "unknown error"}`);
   }
-  const data = JSON.parse(stdout);
-  const streams: any[] = data.streams || [];
+  const data = JSON.parse(stdout) as { streams?: any[]; format?: any };
+  const streams = data.streams || [];
   const audio = streams.find((s) => s.codec_type === "audio");
   const video = streams.find((s) => s.codec_type === "video");
   const format = data.format || {};
-  const fps = video?.avg_frame_rate ? evalFps(video.avg_frame_rate) : undefined;
-  const result: ProbeResult = {
+  return {
     duration: parseFloat(format.duration || "0") || 0,
     width: video?.width,
     height: video?.height,
@@ -84,75 +93,80 @@ export async function probeMedia(filePath: string): Promise<ProbeResult> {
     audioSampleRate: audio?.sample_rate ? parseInt(audio.sample_rate) : undefined,
     audioChannels: audio?.channels,
     videoCodec: video?.codec_name,
-    fps,
+    fps: video?.avg_frame_rate ? evalFps(video.avg_frame_rate) : undefined,
     format: format.format_name,
     bitrate: format.bit_rate ? parseInt(format.bit_rate) : undefined,
   };
-  console.log("[probe] OK:", result.duration + "s, audio:", result.hasAudio);
-  return result;
-}
-
-function evalFps(expr: string): number | undefined {
-  const [a, b] = expr.split("/").map(Number);
-  if (!b || !isFinite(a / b)) return undefined;
-  return a / b;
 }
 
 // ========== Waveform ==========
 
-export async function getWaveform(filePath: string, samples: number): Promise<WaveformPoint[]> {
-  const targetSamples = Math.max(256, Math.min(20000, samples));
-  console.log("[waveform] start, target:", targetSamples, "file:", filePath);
+export async function getWaveform(
+  filePath: string,
+  samples: number,
+  durationHint?: number,
+): Promise<WaveformPoint[]> {
+  const targetSamples = clamp(Math.round(samples) || 4000, 256, 20000);
+  const duration = Math.max(0, durationHint ?? 0);
+
+  // Aim for ~16 samples per waveform bucket. This keeps memory bounded on
+  // long files (8kHz * hours would buffer hundreds of MB) while short clips
+  // keep enough temporal resolution.
+  const sampleRate = duration > 0
+    ? clamp(Math.ceil((targetSamples * 16) / duration), 800, 8000)
+    : 8000;
 
   const args = [
+    "-nostdin",
     "-i", filePath,
-    "-vn",                    // no video
-    "-ac", "1",               // mono
-    "-ar", "8000",            // 8kHz is enough for waveform
-    "-f", "f32le",            // raw float32 PCM
+    "-vn",
+    "-ac", "1",
+    "-ar", String(sampleRate),
+    "-f", "f32le",
     "-hide_banner",
     "-loglevel", "error",
-    "pipe:1",                 // output to stdout
+    "pipe:1",
   ];
 
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     const child = spawn(ffmpegPath, args, { windowsHide: true });
     const chunks: Buffer[] = [];
-    let stderrBuf = "";
+    let stderr = "";
 
     child.stdout.on("data", (d) => chunks.push(d));
-    child.stderr.on("data", (d) => { stderrBuf += d.toString(); });
-
+    child.stderr.on("data", (d) => {
+      stderr += d.toString();
+    });
     child.on("error", (err) => {
       console.error("[waveform] spawn error:", err.message);
-      resolve([]); // Don't throw, return empty
+      resolve([]);
     });
-
     child.on("close", (code) => {
       if (code !== 0) {
-        console.error("[waveform] ffmpeg exited", code, ":", stderrBuf.slice(0, 300));
-        return resolve([]); // Return empty instead of throwing
+        console.error("[waveform] ffmpeg exit", code, ":", stderr.slice(0, 300));
+        resolve([]);
+        return;
       }
       const buf = Buffer.concat(chunks);
       const floats = new Float32Array(buf.buffer, buf.byteOffset, Math.floor(buf.byteLength / 4));
-      console.log("[waveform] raw samples:", floats.length);
-      if (floats.length === 0) return resolve([]);
-
+      if (floats.length === 0) {
+        resolve([]);
+        return;
+      }
       const bucketSize = Math.max(1, Math.floor(floats.length / targetSamples));
-      const sampleRate = 8000;
       const points: WaveformPoint[] = [];
       for (let i = 0; i < floats.length; i += bucketSize) {
-        let min = 1, max = -1;
+        let min = 1;
+        let max = -1;
         const end = Math.min(i + bucketSize, floats.length);
         for (let j = i; j < end; j++) {
           const v = floats[j];
           if (v < min) min = v;
           if (v > max) max = v;
         }
-        const t = i / sampleRate;
-        points.push({ t, min, max });
+        points.push({ t: i / sampleRate, min, max });
       }
-      console.log("[waveform] OK, points:", points.length);
+      console.log("[waveform] OK, points:", points.length, "sr:", sampleRate);
       resolve(points);
     });
   });
@@ -162,17 +176,22 @@ export async function getWaveform(filePath: string, samples: number): Promise<Wa
 
 export async function exportAudio(
   opts: ExportOptions,
-  onProgress: (p: ExportProgress) => void
+  onProgress: (p: ExportProgress) => void,
 ): Promise<void> {
   const { inputPath, start, end, outputPath, format } = opts;
   const duration = Math.max(0.01, end - start);
 
   const args: string[] = [
-    "-hide_banner", "-loglevel", "error", "-y",
-    "-ss", start.toFixed(3),
+    "-hide_banner",
+    "-nostdin",
+    "-loglevel", "error",
+    "-y",
     "-i", inputPath,
+    // -ss after -i: decode-accurate start point for audio cuts.
+    "-ss", start.toFixed(3),
     "-t", duration.toFixed(3),
     "-vn",
+    "-map", "0:a:0?",
   ];
 
   if (format === "wav") {
@@ -180,25 +199,35 @@ export async function exportAudio(
   } else {
     args.push("-c:a", "libmp3lame", "-b:a", `${opts.mp3Bitrate ?? 192}k`);
   }
-  args.push(outputPath);
+  args.push("-progress", "pipe:1", outputPath);
 
   return new Promise((resolve, reject) => {
     const child = spawn(ffmpegPath, args, { windowsHide: true });
     let stderr = "";
+    let pending = "";
+    let lastMs = 0;
+
+    child.stdout.on("data", (d) => {
+      pending += d.toString();
+      const re = /out_time_ms=(\d+)/g;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(pending))) lastMs = parseInt(m[1], 10);
+      if (lastMs > 0) {
+        onProgress({ percent: Math.min(99, (lastMs / 1000 / duration) * 100), done: false });
+      }
+      // Drop already-consumed progress keys so the buffer stays small.
+      const tail = pending.lastIndexOf("progress=");
+      if (tail >= 0) pending = pending.slice(tail);
+    });
     child.stderr.on("data", (d) => {
       stderr += d.toString();
-      const m = stderr.match(/time=(\d+):(\d+):([\d.]+)/);
-      if (m) {
-        const cur = parseInt(m[1]) * 3600 + parseInt(m[2]) * 60 + parseFloat(m[3]);
-        const pct = Math.min(99, Math.max(0, (cur / duration) * 100));
-        onProgress({ percent: pct, done: false });
-      }
     });
     child.on("error", reject);
     child.on("close", (code) => {
       if (code !== 0) {
         onProgress({ percent: 0, done: true, error: `ffmpeg exited with code ${code}` });
-        return reject(new Error(`ffmpeg exited with code ${code}`));
+        reject(new Error(`ffmpeg exited with code ${code}: ${stderr.slice(-300)}`));
+        return;
       }
       onProgress({ percent: 100, done: true, outputPath });
       resolve();

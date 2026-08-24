@@ -1,387 +1,357 @@
-﻿import React, { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useMaterials } from "./hooks/useMaterials.js";
+import { usePlayback } from "./hooks/usePlayback.js";
+import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts.js";
+import { useToast } from "./hooks/useToast.js";
+import { TopBar } from "./components/TopBar.js";
+import { MaterialList } from "./components/MaterialList.js";
+import { EmptyState } from "./components/EmptyState.js";
+import { Preview } from "./components/Preview.js";
+import { TransportBar } from "./components/TransportBar.js";
+import { TimelineInfo } from "./components/TimelineInfo.js";
+import { TimelineControls } from "./components/TimelineControls.js";
+import { ExportBar, CATEGORIES, type Category } from "./components/ExportBar.js";
+import { Toast } from "./components/Toast.js";
 import { Waveform } from "./components/Waveform.js";
-import type { ProbeResult, WaveformPoint, ExportOptions, ExportProgress } from "../shared/types.js";
+import { IconWave } from "./components/Icons.js";
+import { baseName, fileName, isVideoFile } from "./lib/file.js";
+import type { ExportFormat } from "../shared/types.js";
 
-declare global {
-  interface Window {
-    api: {
-      openVideo: () => Promise<string | null>;
-      saveAudio: (defaultName: string) => Promise<string | null>;
-      probe: (filePath: string) => Promise<ProbeResult>;
-      waveform: (filePath: string, samples: number) => Promise<WaveformPoint[]>;
-      exportAudio: (opts: ExportOptions) => Promise<void>;
-      onExportProgress: (cb: (p: ExportProgress) => void) => () => void;
-      showInFolder: (filePath: string) => Promise<void>;
-      onFileDropped: (cb: (paths: string[]) => void) => void;
-      addToSoundpad: (filePath: string, category?: string) => Promise<{ ok: boolean; error?: string }>;
-    };
-  }
-}
-
-const fmtTime = (s: number): string => {
-  if (!isFinite(s) || s < 0) return "00:00.00";
-  const m = Math.floor(s / 60);
-  const sec = s % 60;
-  return `${String(m).padStart(2, "0")}:${sec.toFixed(2).padStart(5, "0")}`;
+const getStoredFormat = (): ExportFormat => {
+  const stored = localStorage.getItem("exportFormat");
+  return stored === "mp3" ? "mp3" : "wav";
 };
 
-interface Saved {
-  path: string; url: string; probe: ProbeResult | null;
-  waveform: WaveformPoint[]; inPoint: number | null; outPoint: number | null; duration: number;
-}
-
-const CATEGORIES = ["Quick Cut", "Voice", "FX", "Music", "Ambient"];
-const getStoredFormat = (): "wav" | "mp3" => (localStorage.getItem("exportFormat") as "wav" | "mp3") || "wav";
-const setStoredFormat = (f: "wav" | "mp3") => localStorage.setItem("exportFormat", f);
+const defaultSoundName = (filePath: string): string => baseName(filePath).slice(0, 5);
 
 export default function App() {
-  const [materials, setMaterials] = useState<Saved[]>([]);
-  const [activeIdx, setActiveIdx] = useState<number | null>(null);
+  const {
+    materials,
+    activeIdx,
+    active,
+    waveformLoading,
+    loadVideo,
+    removeMaterial,
+    switchMaterial,
+    patchActive,
+    clearSelection,
+  } = useMaterials();
 
-  const videoPath = activeIdx !== null ? materials[activeIdx]?.path ?? null : null;
-  const videoUrl = activeIdx !== null ? materials[activeIdx]?.url ?? null : null;
-  const probe = activeIdx !== null ? materials[activeIdx]?.probe ?? null : null;
-  const waveform = activeIdx !== null ? materials[activeIdx]?.waveform ?? [] : [];
-  const inPoint = activeIdx !== null ? materials[activeIdx]?.inPoint ?? null : null;
-  const outPoint = activeIdx !== null ? materials[activeIdx]?.outPoint ?? null : null;
-  const duration = activeIdx !== null ? materials[activeIdx]?.duration ?? 0 : 0;
-
-  const [waveformLoading, setWaveformLoading] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [exportFormat, setExportFormat] = useState<"wav" | "mp3">(getStoredFormat());
+  const { toast, showToast } = useToast();
+  const [exportFormat, setExportFormat] = useState<ExportFormat>(getStoredFormat);
   const [exporting, setExporting] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [toast, setToast] = useState<{ msg: string; kind: "success" | "error" } | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [waveformZoom, setWaveformZoom] = useState(1);
-  const [playing, setPlaying] = useState(false);
-  const [category, setCategory] = useState("Quick Cut");
+  const [category, setCategory] = useState<Category>(CATEGORIES[0]);
+  const [soundName, setSoundName] = useState("");
 
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const previewCheckRef = useRef<(() => void) | null>(null);
+  const videoUrl = active?.url ?? null;
+  const probe = active?.probe ?? null;
+  const inPoint = active?.inPoint ?? null;
+  const outPoint = active?.outPoint ?? null;
+  const duration = active?.duration ?? 0;
 
-  const pathRef = useRef(videoPath); pathRef.current = videoPath;
-  const inRef = useRef(inPoint); inRef.current = inPoint;
-  const outRef = useRef(outPoint); outRef.current = outPoint;
-  const durRef = useRef(duration); durRef.current = duration;
-  const fpsRef = useRef(30); fpsRef.current = probe?.fps ?? 30;
-  const catRef = useRef(category); catRef.current = category;
+  const selectionRef = useRef({ inPoint, outPoint, duration, fps: probe?.fps ?? 30 });
+  selectionRef.current = { inPoint, outPoint, duration, fps: probe?.fps ?? 30 };
 
-  const updateMaterial = useCallback((idx: number, patch: Partial<Saved>) => {
-    setMaterials((prev) => { const next = [...prev]; if (idx >= 0 && idx < next.length) next[idx] = { ...next[idx], ...patch }; return next; });
-  }, []);
+  const activeRef = useRef(active);
+  activeRef.current = active;
+  const categoryRef = useRef(category);
+  categoryRef.current = category;
+  const formatRef = useRef(exportFormat);
+  formatRef.current = exportFormat;
+  const soundNameRef = useRef(soundName);
+  soundNameRef.current = soundName;
+  // Per-material export counter, so clips from the same video get _01, _02...
+  const exportCountRef = useRef(new Map<string, number>());
 
-  const setInPoint = useCallback((v: number | null) => { if (activeIdx !== null) updateMaterial(activeIdx, { inPoint: v }); }, [activeIdx, updateMaterial]);
-  const setOutPoint = useCallback((v: number | null) => { if (activeIdx !== null) updateMaterial(activeIdx, { outPoint: v }); }, [activeIdx, updateMaterial]);
-  const setDurationFn = useCallback((v: number) => { if (activeIdx !== null) updateMaterial(activeIdx, { duration: v }); }, [activeIdx, updateMaterial]);
+  // When switching materials, refresh the placeholder (first 5 chars of the
+  // video's file name) and clear any typed name. The counter is per material,
+  // so numbering starts over automatically.
+  useEffect(() => {
+    if (active) setSoundName("");
+  }, [active?.path]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const saveCurrent = useCallback(() => {
-    if (activeIdx === null || !pathRef.current) return;
-    updateMaterial(activeIdx, { probe, waveform, inPoint: inRef.current, outPoint: outRef.current, duration: durRef.current, path: pathRef.current, url: videoUrl! });
-  }, [activeIdx, probe, waveform, videoUrl, updateMaterial]);
-
-  // ---- Play helper: seek to inPoint if outside selection ----
-  const playOrPause = useCallback(() => {
-    const v = videoRef.current; if (!v) return;
-    if (v.paused) {
-      const i = inRef.current, o = outRef.current;
-      // Seek to inPoint if before selection OR after selection ended
-      if (i !== null && (v.currentTime < i || (o !== null && v.currentTime >= o))) {
-        v.currentTime = i;
-      }
-      v.play();
-    } else { v.pause(); }
-  }, []);
-
-  const repeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const stepFrame = (dir: 1 | -1) => { const v = videoRef.current; if (!v) return; v.currentTime = Math.max(0, Math.min(durRef.current, v.currentTime + dir / fpsRef.current)); };
-  const stepSecond = (dir: 1 | -1) => { const v = videoRef.current; if (!v) return; v.currentTime = Math.max(0, Math.min(durRef.current, v.currentTime + dir)); };
-  const startRepeat = (fn: () => void) => { fn(); repeatRef.current = setInterval(fn, 80); };
-  const stopRepeat = () => { if (repeatRef.current) { clearInterval(repeatRef.current); repeatRef.current = null; } };
-  useEffect(() => () => stopRepeat(), []);
-
-  useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(null), 3000); return () => clearTimeout(t); }, [toast]);
+  const playback = usePlayback(
+    videoUrl,
+    () => selectionRef.current,
+    useCallback(
+      (d: number) => {
+        if (selectionRef.current.duration === 0 && d > 0) patchActive({ duration: d });
+      },
+      [patchActive],
+    ),
+  );
 
   useEffect(() => {
-    const off = window.api.onExportProgress((p) => { setProgress(p.percent); if (p.done) { setExporting(false); if (p.error) setToast({ msg: "导出失败", kind: "error" }); else setToast({ msg: "导出成功", kind: "success" }); } });
-    return off;
-  }, []);
-  const nextIdxRef = useRef(0);
-  const matRef = useRef(materials); matRef.current = materials; // stable ref
-
-  const loadVideo = useCallback(async (filePath: string) => {
-    const url = "file:///" + filePath.replace(/\\/g, "/");
-    const existing = materials.findIndex((m) => m.path === filePath);
-    if (existing >= 0) { setActiveIdx(existing); return; }
-    const newIdx = nextIdxRef.current++;
-    const empty: Saved = { path: filePath, url, probe: null, waveform: [], inPoint: null, outPoint: null, duration: 0 };
-    setMaterials((prev) => [...prev, empty]);
-    setActiveIdx(newIdx);
-    setCurrentTime(0);
-    setWaveformLoading(true);
-    try {
-      const p = await window.api.probe(filePath);
-      // Verify this material wasn't removed during the await
-      if (matRef.current[newIdx]?.path !== filePath) return;
-      if (p.hasAudio) {
-        try {
-          const w = await window.api.waveform(filePath, 4000);
-          if (matRef.current[newIdx]?.path !== filePath) return;
-          updateMaterial(newIdx, { probe: p, waveform: w, duration: p.duration });
-        } catch { updateMaterial(newIdx, { probe: p, duration: p.duration }); }
-      } else { updateMaterial(newIdx, { probe: p, duration: p.duration }); setToast({ msg: "无音频轨道", kind: "error" }); }
-    } catch (e) { setToast({ msg: "读取失败: " + (e as Error).message, kind: "error" }); }
-    finally { setWaveformLoading(false); }
-  }, [materials, updateMaterial]);
-
-  const removeMaterial = useCallback((idx: number) => {
-    setMaterials((prev) => {
-      const next = prev.filter((_, i) => i !== idx);
-      nextIdxRef.current = next.length; // keep counter in sync
-      return next;
+    return window.api.onExportProgress((p) => {
+      setProgress(p.percent);
+      if (p.done) setExporting(false);
     });
-    setActiveIdx((prev) => prev === null ? null : prev === idx ? null : prev > idx ? prev - 1 : prev);
   }, []);
 
-  const switchMaterial = useCallback((idx: number) => { saveCurrent(); setActiveIdx(idx); setCurrentTime(0); }, [saveCurrent]);
+  const handleLoad = useCallback(
+    async (filePath: string) => {
+      const result = await loadVideo(filePath);
+      if (!result.ok) showToast(result.message ?? "加载失败", "error");
+    },
+    [loadVideo, showToast],
+  );
 
-  const handleOpen = useCallback(async () => { const p = await window.api.openVideo(); if (p) loadVideo(p); }, [loadVideo]);
+  const handleOpen = useCallback(async () => {
+    const filePath = await window.api.openVideo();
+    if (filePath) await handleLoad(filePath);
+  }, [handleLoad]);
+
+  const handleSelect = useCallback(
+    (idx: number) => {
+      switchMaterial(idx);
+      playback.seek(0);
+    },
+    [switchMaterial, playback.seek],
+  );
 
   useEffect(() => {
     let mounted = true;
     window.api.onFileDropped((paths: string[]) => {
       if (!mounted) return;
       setDragOver(false);
-      for (const filePath of paths) {
-        if (/\.(mp4|mkv|mov|avi|webm|flv|wmv|m4v|mpg|mpeg|ts)$/i.test(filePath)) {
-          loadVideo(filePath);
-        }
+      const videos = paths.filter(isVideoFile);
+      if (videos.length === 0) {
+        showToast("拖入的文件不是支持的视频格式", "error");
+        return;
       }
+      for (const p of videos) void handleLoad(p);
     });
-    const onOver = (e: DragEvent) => { e.preventDefault(); setDragOver(true); };
-    const onLeave = (e: DragEvent) => { if (e.relatedTarget === null) setDragOver(false); };
-    document.addEventListener("dragover", onOver); document.addEventListener("dragleave", onLeave);
-    return () => { mounted = false; document.removeEventListener("dragover", onOver); document.removeEventListener("dragleave", onLeave); };
-  }, [loadVideo]);
-
-  useEffect(() => {
-    const v = videoRef.current; if (!v) return;
-    let raf: number;
-    const tick = () => { setCurrentTime(v.currentTime); if (outRef.current !== null && v.currentTime >= outRef.current) v.pause(); raf = requestAnimationFrame(tick); };
-    const onMeta = () => { if (durRef.current === 0 && v.duration > 0) setDurationFn(v.duration); };
-    const onPlay = () => { setPlaying(true); raf = requestAnimationFrame(tick); };
-    const onPause = () => { setPlaying(false); cancelAnimationFrame(raf); };
-    const onEnded = () => { setPlaying(false); cancelAnimationFrame(raf); };
-    v.addEventListener("loadedmetadata", onMeta);
-    v.addEventListener("play", onPlay);
-    v.addEventListener("pause", onPause);
-    v.addEventListener("ended", onEnded);
-    return () => {
-      cancelAnimationFrame(raf);
-      v.removeEventListener("loadedmetadata", onMeta);
-      v.removeEventListener("play", onPlay);
-      v.removeEventListener("pause", onPause);
-      v.removeEventListener("ended", onEnded);
+    const onOver = (e: DragEvent) => {
+      e.preventDefault();
+      setDragOver(true);
     };
-  }, [videoUrl]);
-
-  const handleSeek = useCallback((t: number) => { const v = videoRef.current; if (v) v.currentTime = t; setCurrentTime(t); }, []);
-  const handleRegionChange = useCallback((s: number, e: number) => {
-    if (activeIdx !== null) updateMaterial(activeIdx, { inPoint: s, outPoint: e });
-  }, [activeIdx, updateMaterial]);
-  const handleZoomChange = useCallback((z: number) => setWaveformZoom(z), []);
+    const onLeave = (e: DragEvent) => {
+      if (e.relatedTarget === null) setDragOver(false);
+    };
+    document.addEventListener("dragover", onOver);
+    document.addEventListener("dragleave", onLeave);
+    return () => {
+      mounted = false;
+      document.removeEventListener("dragover", onOver);
+      document.removeEventListener("dragleave", onLeave);
+    };
+  }, [handleLoad, showToast]);
 
   const setInHere = useCallback(() => {
-    const v = videoRef.current; if (!v) return;
+    const v = playback.videoRef.current;
+    const cur = activeRef.current;
+    if (!v || !cur) return;
     const t = v.currentTime;
-    if (activeIdx === null) return;
-    const curOut = materials[activeIdx]?.outPoint ?? null;
-    updateMaterial(activeIdx, { inPoint: t, outPoint: (curOut !== null && t > curOut ? null : curOut) });
-  }, [activeIdx, materials, updateMaterial]);
+    patchActive({
+      inPoint: t,
+      outPoint: cur.outPoint !== null && t > cur.outPoint ? null : cur.outPoint,
+    });
+  }, [playback.videoRef, patchActive]);
 
   const setOutHere = useCallback(() => {
-    const v = videoRef.current; if (!v) return;
+    const v = playback.videoRef.current;
+    const cur = activeRef.current;
+    if (!v || !cur) return;
     const t = v.currentTime;
-    if (activeIdx === null) return;
-    const curIn = materials[activeIdx]?.inPoint ?? null;
-    updateMaterial(activeIdx, { outPoint: t, inPoint: (curIn !== null && t < curIn ? null : curIn) });
-  }, [activeIdx, materials, updateMaterial]);
+    patchActive({
+      outPoint: t,
+      inPoint: cur.inPoint !== null && t < cur.inPoint ? null : cur.inPoint,
+    });
+  }, [playback.videoRef, patchActive]);
 
-  const handlePreview = useCallback(() => {
-    const v = videoRef.current; if (!v) return;
-    const i = inRef.current, o = outRef.current; if (i === null || o === null) return;
-    if (previewCheckRef.current) v.removeEventListener("timeupdate", previewCheckRef.current);
-    v.currentTime = i; v.play();
-    const check = () => { if (v.currentTime >= o) { v.pause(); v.removeEventListener("timeupdate", check); previewCheckRef.current = null; } };
-    previewCheckRef.current = check; v.addEventListener("timeupdate", check);
-  }, []);
-  useEffect(() => () => { if (previewCheckRef.current && videoRef.current) videoRef.current.removeEventListener("timeupdate", previewCheckRef.current); }, [videoUrl]);
+  const handleRegionChange = useCallback(
+    (s: number, e: number) => {
+      patchActive({ inPoint: s, outPoint: e });
+    },
+    [patchActive],
+  );
 
-  const doExport = useCallback(async (toSoundpad: boolean) => {
-    const p = pathRef.current, i = inRef.current, o = outRef.current;
-    if (!p || i === null || o === null) return;
-    const baseName = p.replace(/\\/g, "/").split("/").pop()!.replace(/\.[^.]+$/, "");
-    const cat = toSoundpad ? catRef.current : "";
-    const prefix = cat ? cat + "_" : "";
-    const f = exportFormat;
-    const defaultName = prefix + baseName + "_" + fmtTime(i).replace(/[:.]/g, "-") + "." + f;
-    const outPath = await window.api.saveAudio(defaultName);
-    if (!outPath) return;
-    setExporting(true); setProgress(0);
-    try {
-      await window.api.exportAudio({ inputPath: p, start: i, end: o, outputPath: outPath, format: f, mp3Bitrate: 192, wavSampleRate: 44100, wavChannels: 2 });
-      window.api.showInFolder(outPath);
-      if (toSoundpad) {
-        const sp = await window.api.addToSoundpad(outPath, cat);
-        setToast({ msg: sp.ok ? "已添加至 Soundpad [" + cat + "]" : "导出成功，但 Soundpad: " + (sp.error || "未连接"), kind: "success" });
-      } else {
-        setToast({ msg: "导出成功", kind: "success" });
-      }
-    } catch (e) { setExporting(false); setToast({ msg: "导出失败: " + (e as Error).message, kind: "error" }); }
-  }, [exportFormat]);
-
-  const handleExport = useCallback(() => doExport(false), [doExport]);
-  const handleExportToSp = useCallback(() => doExport(true), [doExport]);
-
-  const setInRef = useRef(setInHere); setInRef.current = setInHere;
-  const setOutRef = useRef(setOutHere); setOutRef.current = setOutHere;
-  const previewRef = useRef(handlePreview); previewRef.current = handlePreview;
-  const exportRef = useRef(handleExport); exportRef.current = handleExport;
-  const activeRef = useRef(activeIdx); activeRef.current = activeIdx;
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
-      if (e.key === "Escape") { const idx = activeRef.current; if (idx !== null) updateMaterial(idx, { inPoint: null, outPoint: null }); return; }
-      const v = videoRef.current; if (!v) return;
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "e") { e.preventDefault(); exportRef.current(); return; }
-      switch (e.key.toLowerCase()) {
-        case " ": e.preventDefault(); playOrPause(); break;
-        case "i": setInRef.current(); break;
-        case "o": setOutRef.current(); break;
-        case "arrowleft": e.shiftKey ? stepSecond(-1) : stepFrame(-1); break;
-        case "arrowright": e.shiftKey ? stepSecond(1) : stepFrame(1); break;
-        case "p": previewRef.current(); break;
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+  const handleFormatChange = useCallback((f: ExportFormat) => {
+    setExportFormat(f);
+    localStorage.setItem("exportFormat", f);
   }, []);
 
-  const selDur = inPoint !== null && outPoint !== null ? outPoint - inPoint : 0;
-  const showSidebar = materials.length > 0;
+  const doExport = useCallback(
+    async (toSoundpad: boolean) => {
+      const cur = activeRef.current;
+      if (!cur || cur.inPoint === null || cur.outPoint === null) return;
+      const i = cur.inPoint;
+      const o = cur.outPoint;
+      const cat = toSoundpad ? categoryRef.current : "";
+      const f = formatRef.current;
+      const count = (exportCountRef.current.get(cur.path) ?? 0) + 1;
+      const namePart = (soundNameRef.current.trim() || defaultSoundName(cur.path)).slice(0, 40);
+      const suffix = `_${String(count).padStart(2, "0")}`;
+      const fileName = `${namePart}${suffix}.${f}`;
+      // Export to Soundpad: use a temp file so no save dialog interrupts the flow.
+      // Plain file export: let the user pick the destination.
+      const outPath = toSoundpad
+        ? await window.api.tempAudioPath(fileName)
+        : await window.api.saveAudio(fileName);
+      if (!outPath) return;
+
+      setExporting(true);
+      setProgress(0);
+      try {
+        await window.api.exportAudio({
+          inputPath: cur.path,
+          start: i,
+          end: o,
+          outputPath: outPath,
+          format: f,
+          mp3Bitrate: 192,
+          wavSampleRate: 44100,
+          wavChannels: 2,
+        });
+        if (toSoundpad) {
+          const sp = await window.api.addToSoundpad(outPath, cat);
+          if (sp.ok) exportCountRef.current.set(cur.path, count);
+          showToast(
+            sp.ok
+              ? `已导出并添加至 Soundpad [${cat}]`
+              : `导出失败，Soundpad: ${sp.error || "未连接"}`,
+            "success",
+          );
+        } else {
+          window.api.showInFolder(outPath);
+          exportCountRef.current.set(cur.path, count);
+          showToast("导出成功", "success");
+        }
+      } catch (err) {
+        setExporting(false);
+        showToast("导出失败: " + (err as Error).message, "error");
+      }
+    },
+    [showToast],
+  );
+
+  const handleExportToSp = useCallback(() => void doExport(true), [doExport]);
+  const handleExportFile = useCallback(() => void doExport(false), [doExport]);
+
+  useKeyboardShortcuts({
+    onClearSelection: clearSelection,
+    onExport: handleExportFile,
+    onPlayPause: playback.playOrPause,
+    onInPoint: setInHere,
+    onOutPoint: setOutHere,
+    onPreview: playback.previewSelection,
+    onStepFrame: playback.stepFrame,
+    onStepSecond: playback.stepSecond,
+  });
+
+  const zoomOut = useCallback(
+    () => setWaveformZoom((z) => Math.max(1, Math.round((z / 1.15) * 4) / 4)),
+    [],
+  );
+  const zoomIn = useCallback(
+    () => setWaveformZoom((z) => Math.min(40, Math.round(z * 1.15 * 4) / 4)),
+    [],
+  );
+  const zoomReset = useCallback(() => setWaveformZoom(1), []);
+
+  const canExport = active !== null && inPoint !== null && outPoint !== null;
 
   return (
     <div className="app">
-      <div className="topbar">
-        <span className="title">Soundpad Quick Cut</span>
-        <button onClick={handleOpen} className="primary">导入视频</button>
-        {videoPath && <span className="filename" title={videoPath}>{videoPath.replace(/\\/g, "/").split("/").pop()}</span>}
-        <div className="spacer" />
-        {materials.length > 0 && <span className="mat-count">{materials.length} 个素材</span>}
-      </div>
-
+      <TopBar
+        fileName={videoUrl && active ? fileName(active.path) : null}
+        materialCount={materials.length}
+        onOpen={handleOpen}
+      />
       <div className="workspace">
-        {showSidebar && (
-          <div className="sidebar">
-            <div className="sidebar-header">素材库</div>
-            <div className="sidebar-list">
-              {materials.map((m, i) => (
-                <div key={i} className={"sidebar-item" + (i === activeIdx ? " active" : "")} onClick={() => switchMaterial(i)}>
-                  <span className="sidebar-item-name" title={m.path}>{m.path.replace(/\\/g, "/").split("/").pop()}</span>
-                  <span className="sidebar-item-time">{m.duration > 0 ? fmtTime(m.duration) : "..."}</span>
-                  <button className="sidebar-item-del" onClick={(e) => { e.stopPropagation(); removeMaterial(i); }} title="移除">x</button>
-                </div>
-              ))}
-            </div>
-          </div>
+        {materials.length > 0 && (
+          <MaterialList
+            materials={materials}
+            activeIdx={activeIdx}
+            onSelect={handleSelect}
+            onRemove={removeMaterial}
+          />
         )}
-
         <div className="content">
-          {!videoUrl ? (
-            <div className="empty-state">
-              <div className={"dropzone" + (dragOver ? " dragover" : "")}>
-                <div className="big"></div>
-                <div>拖入视频文件，或点击上方"导入视频"</div>
-                <div className="hint">MP4 / MKV / MOV / AVI / WebM</div>
-              </div>
-            </div>
+          {!videoUrl || !active ? (
+            <EmptyState dragOver={dragOver} />
           ) : (
             <>
-              <div className="preview">
-                <video ref={videoRef} src={videoUrl} controls={false}
-                  onClick={playOrPause} />
-              </div>
-
-              <div className="transport-bar">
-                <button onMouseDown={() => startRepeat(() => stepFrame(-1))} onMouseUp={stopRepeat} onMouseLeave={stopRepeat}>-1帧</button>
-                <button onMouseDown={() => startRepeat(() => stepSecond(-1))} onMouseUp={stopRepeat} onMouseLeave={stopRepeat}>-1秒</button>
-                <button className="primary play-btn" onClick={playOrPause}>{playing ? "暂停" : "播放"}</button>
-                <button onMouseDown={() => startRepeat(() => stepSecond(1))} onMouseUp={stopRepeat} onMouseLeave={stopRepeat}>+1秒</button>
-                <button onMouseDown={() => startRepeat(() => stepFrame(1))} onMouseUp={stopRepeat} onMouseLeave={stopRepeat}>+1帧</button>
-              </div>
-
+              <Preview
+                src={videoUrl}
+                videoRef={playback.videoRef}
+                onClick={playback.playOrPause}
+                playing={playback.playing}
+                currentTime={playback.currentTime}
+                duration={duration}
+              />
+              <TransportBar
+                playing={playback.playing}
+                onPlayPause={playback.playOrPause}
+                onStepFrame={playback.stepFrame}
+                onStepSecond={playback.stepSecond}
+                onHoldStart={playback.startRepeat}
+                onHoldEnd={playback.stopRepeat}
+              />
               <div className="timeline">
-                <div className="timeline-info">
-                  <span className="tc-item">入点 <span className="in">{inPoint !== null ? fmtTime(inPoint) : "--:--.--"}</span></span>
-                  <span className="tc-item">当前 <span className="value">{fmtTime(currentTime)}</span></span>
-                  <span className="tc-item">出点 <span className="out">{outPoint !== null ? fmtTime(outPoint) : "--:--.--"}</span></span>
-                  <span className="tc-item">时长 <span className="value">{fmtTime(duration)}</span></span>
-                  <span className="tc-item">选段 <span className="value">{selDur > 0 ? fmtTime(selDur) : "--:--.--"}</span></span>
-                  {probe && <span className="tc-item">音频 <span className="value">{probe.audioCodec} {probe.audioSampleRate}Hz {probe.audioChannels}ch</span></span>}
-                </div>
-
+                <TimelineInfo
+                  currentTime={playback.currentTime}
+                  inPoint={inPoint}
+                  outPoint={outPoint}
+                  duration={duration}
+                  probe={probe}
+                />
                 <Waveform
-                  points={waveform} duration={duration} playhead={currentTime}
-                  inPoint={inPoint} outPoint={outPoint} loading={waveformLoading}
-                  zoom={waveformZoom} playing={playing}
-                  onSeek={handleSeek} onRegionChange={handleRegionChange} onZoomChange={handleZoomChange} />
-
-                <div className="controls">
-                  <div className="controls-left">
-                    <button className="io-btn in" onClick={setInHere}>入点 <span className="kbd">I</span></button>
-                    <button className="io-btn out" onClick={setOutHere}>出点 <span className="kbd">O</span></button>
-                    <button onClick={handlePreview} disabled={inPoint === null || outPoint === null}>预听 <span className="kbd">P</span></button>
-                    <button onClick={() => { if (activeIdx !== null) updateMaterial(activeIdx, { inPoint: null, outPoint: null }); }}
-                      disabled={inPoint === null && outPoint === null}>清除选区</button>
-                  </div>
-                  <div className="controls-right">
-                    <button onClick={() => setWaveformZoom(Math.max(1, Math.round(waveformZoom / 1.15 * 4) / 4))} disabled={waveformZoom <= 1}>-</button>
-                    <span className="zoom-label">{waveformZoom.toFixed(1)}x</span>
-                    <button onClick={() => setWaveformZoom(Math.min(40, Math.round(waveformZoom * 1.15 * 4) / 4))} disabled={waveformZoom >= 40}>+</button>
-                    <button onClick={() => setWaveformZoom(1)} disabled={waveformZoom === 1}>重置</button>
-                    <span className="kbd">Ctrl+滚轮</span>
-                  </div>
-                </div>
+                  points={active.waveform}
+                  duration={duration}
+                  inPoint={inPoint}
+                  outPoint={outPoint}
+                  loading={waveformLoading}
+                  zoom={waveformZoom}
+                  onSeek={playback.seek}
+                  onRegionChange={handleRegionChange}
+                  onZoomChange={setWaveformZoom}
+                  onPlayhead={playback.subscribePlayhead}
+                />
+                <TimelineControls
+                  inPoint={inPoint}
+                  outPoint={outPoint}
+                  zoom={waveformZoom}
+                  onIn={setInHere}
+                  onOut={setOutHere}
+                  onPreview={playback.previewSelection}
+                  onClear={clearSelection}
+                  onZoomOut={zoomOut}
+                  onZoomIn={zoomIn}
+                  onZoomReset={zoomReset}
+                />
               </div>
-
-              <div className="export-bar">
-                <select value={category} onChange={(e) => setCategory(e.target.value)}>
-                  {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
-                </select>
-                <select value={exportFormat} onChange={(e) => { const f = e.target.value as "wav" | "mp3"; setExportFormat(f); setStoredFormat(f); }}>
-                  <option value="wav">WAV</option>
-                  <option value="mp3">MP3 192kbps</option>
-                </select>
-                <button className="primary" onClick={handleExportToSp}
-                  disabled={exporting || inPoint === null || outPoint === null || !videoPath}>
-                  {exporting ? "导出中..." : "导出到 Soundpad"}
-                </button>
-                <button onClick={handleExport}
-                  disabled={exporting || inPoint === null || outPoint === null || !videoPath}>
-                  仅导出文件
-                </button>
-                {exporting && <div className="progress"><div className="fill" style={{ width: `${progress}%` }} /></div>}
-                {exporting && <span className="status">{progress.toFixed(0)}%</span>}
-                {!exporting && <span className="status">{waveformLoading ? "分析波形..." : ""}</span>}
-              </div>
+              <ExportBar
+                soundName={soundName}
+                soundNamePlaceholder={active ? defaultSoundName(active.path) : ""}
+                category={category}
+                format={exportFormat}
+                exporting={exporting}
+                progress={progress}
+                waveformLoading={waveformLoading}
+                canExport={canExport}
+                onCategoryChange={setCategory}
+                onFormatChange={handleFormatChange}
+                onSoundNameChange={setSoundName}
+                onExportToSoundpad={handleExportToSp}
+                onExportFile={handleExportFile}
+              />
             </>
           )}
         </div>
       </div>
-
-      {toast && <div className={"toast " + toast.kind}>{toast.msg}</div>}
-      {dragOver && (<div className="drag-overlay"><div className="drag-overlay-content"><div className="drag-overlay-icon"></div><div>释放以导入视频文件</div></div></div>)}
+      {toast && <Toast toast={toast} />}
+      {dragOver && (
+        <div className="drag-overlay">
+          <div className="drag-overlay-content">
+            <div className="drag-overlay-icon"><IconWave size={30} /></div>
+            <div className="drag-overlay-title">释放以导入视频文件</div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

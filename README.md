@@ -52,6 +52,7 @@ Soundpad Quick Cut 解决了 Soundpad 用户的一个高频痛点：从视频里
 
 ```bash
 npm install
+npm run generate:icon    # 生成应用图标（build/icon.ico，已内置，仅在需要重新生成时执行）
 npm run dev          # 开发模式
 npm run build        # 构建
 npx electron-builder --dir --win --x64   # 打包便携版
