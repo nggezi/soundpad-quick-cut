@@ -21,6 +21,11 @@ export interface WaveformPoint {
   max: number; // -1..1
 }
 
+export interface WaveformResult {
+  points: WaveformPoint[];
+  error?: string;
+}
+
 export type ExportFormat = "wav" | "mp3";
 
 export interface ExportOptions {
@@ -48,14 +53,22 @@ export interface SoundpadResult {
   error?: string;
 }
 
+export interface SoundpadCategories {
+  connected: boolean;
+  categories: string[];
+  soundDir: string | null;
+}
+
 export type IpcChannels = {
   "dialog:openVideo": () => string | null;
   "dialog:saveAudio": (defaultName: string) => string | null;
-  "dialog:tempAudioPath": (fileName: string) => string;
   "ffmpeg:probe": (filePath: string) => ProbeResult;
-  "ffmpeg:waveform": (filePath: string, samples: number, durationHint?: number) => WaveformPoint[];
+  "ffmpeg:waveform": (filePath: string, samples: number, durationHint?: number) => WaveformResult;
   "ffmpeg:export": (opts: ExportOptions) => void;
+  "ffmpeg:exportCancel": () => void;
   "ffmpeg:exportProgress": (cb: (p: ExportProgress) => void) => void;
   "shell:showInFolder": (filePath: string) => void;
   "soundpad:add": (filePath: string, category?: string) => SoundpadResult;
+  "soundpad:categories": () => SoundpadCategories;
+  "soundpad:exportPath": (fileName: string) => string;
 };

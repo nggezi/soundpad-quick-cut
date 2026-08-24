@@ -1,30 +1,34 @@
 import { memo } from "react";
 import type { ExportFormat } from "../../shared/types.js";
-import { IconDownload, IconFolder, IconSoundpad } from "./Icons.js";
+import { IconDownload, IconFolder, IconSoundpad, IconX } from "./Icons.js";
 
 export const CATEGORIES = ["Quick Cut", "Voice", "FX", "Music", "Ambient"] as const;
-export type Category = (typeof CATEGORIES)[number];
 
 interface Props {
   soundName: string;
   soundNamePlaceholder: string;
-  category: Category;
+  category: string;
+  categories: string[];
+  soundpadConnected: boolean;
   format: ExportFormat;
   exporting: boolean;
   progress: number;
   waveformLoading: boolean;
   canExport: boolean;
-  onCategoryChange: (c: Category) => void;
+  onCategoryChange: (c: string) => void;
   onFormatChange: (f: ExportFormat) => void;
   onSoundNameChange: (name: string) => void;
   onExportToSoundpad: () => void;
   onExportFile: () => void;
+  onCancelExport: () => void;
 }
 
 export const ExportBar = memo(function ExportBar({
   soundName,
   soundNamePlaceholder,
   category,
+  categories,
+  soundpadConnected,
   format,
   exporting,
   progress,
@@ -35,9 +39,15 @@ export const ExportBar = memo(function ExportBar({
   onSoundNameChange,
   onExportToSoundpad,
   onExportFile,
+  onCancelExport,
 }: Props) {
+  const categoryOptions = categories.length > 0 ? categories : CATEGORIES;
   return (
     <div className="export-bar">
+      <span className={"sp-status " + (soundpadConnected ? "connected" : "disconnected")} title={soundpadConnected ? "Soundpad 已连接" : "Soundpad 未运行或未启用远程控制"}>
+        <i />
+        {soundpadConnected ? "Soundpad 已连接" : "Soundpad 未连接"}
+      </span>
       <div className="export-options">
         <label className="export-field export-name">
           <span className="export-field-label">命名</span>
@@ -51,8 +61,8 @@ export const ExportBar = memo(function ExportBar({
         </label>
         <label className="export-field">
           <span className="export-field-label">分类</span>
-          <select value={category} onChange={(e) => onCategoryChange(e.target.value as Category)}>
-            {CATEGORIES.map((c) => (
+          <select value={category} onChange={(e) => onCategoryChange(e.target.value)}>
+            {categoryOptions.map((c) => (
               <option key={c} value={c}>{c}</option>
             ))}
           </select>
@@ -66,18 +76,27 @@ export const ExportBar = memo(function ExportBar({
         </label>
       </div>
       <div className="export-actions">
-        <button
-          className="primary"
-          onClick={onExportToSoundpad}
-          disabled={exporting || !canExport}
-        >
-          <IconSoundpad size={16} />
-          {exporting ? "导出中..." : "导出到 Soundpad"}
-        </button>
-        <button onClick={onExportFile} disabled={exporting || !canExport}>
-          <IconDownload size={15} />
-          仅导出文件
-        </button>
+        {exporting ? (
+          <button className="danger" onClick={onCancelExport}>
+            <IconX size={15} />
+            取消导出
+          </button>
+        ) : (
+          <>
+            <button
+              className="primary"
+              onClick={onExportToSoundpad}
+              disabled={!canExport}
+            >
+              <IconSoundpad size={16} />
+              导出到 Soundpad
+            </button>
+            <button onClick={onExportFile} disabled={!canExport}>
+              <IconDownload size={15} />
+              仅导出文件
+            </button>
+          </>
+        )}
       </div>
       <div className="export-status">
         {exporting && (

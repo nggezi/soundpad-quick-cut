@@ -10,11 +10,11 @@ import { Preview } from "./components/Preview.js";
 import { TransportBar } from "./components/TransportBar.js";
 import { TimelineInfo } from "./components/TimelineInfo.js";
 import { TimelineControls } from "./components/TimelineControls.js";
-import { ExportBar, CATEGORIES, type Category } from "./components/ExportBar.js";
+import { ExportBar, CATEGORIES } from "./components/ExportBar.js";
 import { Toast } from "./components/Toast.js";
 import { Waveform } from "./components/Waveform.js";
 import { IconWave } from "./components/Icons.js";
-import { baseName, fileName, isVideoFile } from "./lib/file.js";
+import { baseName, fileName, isMediaFile } from "./lib/file.js";
 import type { ExportFormat } from "../shared/types.js";
 
 const getStoredFormat = (): ExportFormat => {
@@ -43,8 +43,10 @@ export default function App() {
   const [progress, setProgress] = useState(0);
   const [dragOver, setDragOver] = useState(false);
   const [waveformZoom, setWaveformZoom] = useState(1);
-  const [category, setCategory] = useState<Category>(CATEGORIES[0]);
+  const [category, setCategory] = useState<string>(CATEGORIES[0]);
   const [soundName, setSoundName] = useState("");
+  const [soundpadConnected, setSoundpadConnected] = useState(false);
+  const [spCategories, setSpCategories] = useState<string[]>([]);
 
   const videoUrl = active?.url ?? null;
   const probe = active?.probe ?? null;
@@ -65,6 +67,19 @@ export default function App() {
   soundNameRef.current = soundName;
   // Per-material export counter, so clips from the same video get _01, _02...
   const exportCountRef = useRef(new Map<string, number>());
+
+  // Load Soundpad categories once on mount (and whenever the user re-checks).
+  useEffect(() => {
+    let mounted = true;
+    window.api.getSoundpadCategories().then((state) => {
+      if (!mounted) return;
+      setSoundpadConnected(state.connected);
+      setSpCategories(state.categories);
+    });
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   // When switching materials, refresh the placeholder (first 5 chars of the
   // video's file name) and clear any typed name. The counter is per material,
@@ -112,17 +127,21 @@ export default function App() {
     [switchMaterial, playback.seek],
   );
 
+  const handleCancelExport = useCallback(() => {
+    void window.api.cancelExport();
+  }, []);
+
   useEffect(() => {
     let mounted = true;
     window.api.onFileDropped((paths: string[]) => {
       if (!mounted) return;
       setDragOver(false);
-      const videos = paths.filter(isVideoFile);
-      if (videos.length === 0) {
-        showToast("拖入的文件不是支持的视频格式", "error");
+      const media = paths.filter(isMediaFile);
+      if (media.length === 0) {
+        showToast("拖入的文件不是支持的视频/音频格式", "error");
         return;
       }
-      for (const p of videos) void handleLoad(p);
+      for (const p of media) void handleLoad(p);
     });
     const onOver = (e: DragEvent) => {
       e.preventDefault();
@@ -189,7 +208,7 @@ export default function App() {
       // Export to Soundpad: use a temp file so no save dialog interrupts the flow.
       // Plain file export: let the user pick the destination.
       const outPath = toSoundpad
-        ? await window.api.tempAudioPath(fileName)
+        ? await window.api.soundpadExportPath(fileName)
         : await window.api.saveAudio(fileName);
       if (!outPath) return;
 
@@ -222,7 +241,8 @@ export default function App() {
         }
       } catch (err) {
         setExporting(false);
-        showToast("导出失败: " + (err as Error).message, "error");
+        const msg = (err as Error).message;
+        showToast(msg === "导出已取消" ? "导出已取消" : "导出失败: " + msg, msg === "导出已取消" ? "success" : "error");
       }
     },
     [showToast],
@@ -290,6 +310,10 @@ export default function App() {
                 onStepSecond={playback.stepSecond}
                 onHoldStart={playback.startRepeat}
                 onHoldEnd={playback.stopRepeat}
+                loop={playback.loop}
+                onLoopChange={playback.setLoop}
+                volume={playback.volume}
+                onVolumeChange={playback.setVolume}
               />
               <div className="timeline">
                 <TimelineInfo
@@ -328,6 +352,8 @@ export default function App() {
                 soundName={soundName}
                 soundNamePlaceholder={active ? defaultSoundName(active.path) : ""}
                 category={category}
+                categories={spCategories}
+                soundpadConnected={soundpadConnected}
                 format={exportFormat}
                 exporting={exporting}
                 progress={progress}
@@ -338,6 +364,7 @@ export default function App() {
                 onSoundNameChange={setSoundName}
                 onExportToSoundpad={handleExportToSp}
                 onExportFile={handleExportFile}
+                onCancelExport={handleCancelExport}
               />
             </>
           )}

@@ -1,6 +1,7 @@
 import net from "node:net";
 import iconv from "iconv-lite";
-import type { SoundpadResult } from "../../shared/types.js";
+import path from "node:path";
+import type { SoundpadCategories, SoundpadResult } from "../../shared/types.js";
 
 // Soundpad's remote control uses a plain-text command protocol over a named
 // pipe (not JSON). Commands look like:
@@ -58,6 +59,13 @@ function parseCategories(xml: string): CategoryInfo[] {
     }
   }
   return categories;
+}
+
+function parseSoundDir(xml: string): string | null {
+  const match = /<Sound\b[^>]*\burl="([^"]*)"/.exec(xml);
+  if (!match || !match[1]) return null;
+  const dir = path.dirname(match[1]);
+  return dir && dir !== "." ? dir : null;
 }
 
 // Sends one command and waits until the response stops growing (the pipe stays
@@ -142,4 +150,19 @@ export async function addToSoundpad(
   } catch (err) {
     return { ok: false, error: (err as Error).message || "未知错误" };
   }
+}
+
+export async function getSoundpadCategories(): Promise<SoundpadCategories> {
+  const xml = await sendCommand("GetCategories(true, false)");
+  if (!xml) {
+    return { connected: false, categories: [], soundDir: null };
+  }
+  const categories = parseCategories(xml)
+    .map((c) => c.name)
+    .filter((name) => name && name !== "所有声音");
+  return {
+    connected: true,
+    categories,
+    soundDir: parseSoundDir(xml),
+  };
 }

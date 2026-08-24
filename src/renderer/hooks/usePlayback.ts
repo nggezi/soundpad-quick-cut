@@ -15,6 +15,8 @@ export function usePlayback(
   const videoRef = useRef<HTMLVideoElement>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [playing, setPlaying] = useState(false);
+  const [volume, setVolume] = useState(1);
+  const [loop, setLoop] = useState(false);
 
   const selRef = useRef(getSelection);
   selRef.current = getSelection;
@@ -26,6 +28,8 @@ export function usePlayback(
   const playheadListenersRef = useRef(new Set<(t: number, playing: boolean) => void>());
   const playTimingRef = useRef({ playing: false, startWall: 0, startVideo: 0 });
   const lastUiUpdateRef = useRef(0);
+  const loopRef = useRef(loop);
+  loopRef.current = loop;
 
   const notifyPlayhead = useCallback((t: number, isPlaying: boolean) => {
     playheadListenersRef.current.forEach((cb) => cb(t, isPlaying));
@@ -105,6 +109,12 @@ export function usePlayback(
     }
   }, []);
 
+  // Keep the <video> element's volume in sync.
+  useEffect(() => {
+    const v = videoRef.current;
+    if (v) v.volume = volume;
+  }, [volume, videoUrl]);
+
   const startRepeat = useCallback(
     (fn: () => void) => {
       stopRepeat();
@@ -148,8 +158,16 @@ export function usePlayback(
     const tick = () => {
       const { outPoint } = selRef.current();
       if (outPoint !== null && v.currentTime >= outPoint) {
-        v.pause();
-        return;
+        if (loopRef.current) {
+          const { inPoint } = selRef.current();
+          const restartAt = inPoint ?? 0;
+          v.currentTime = restartAt;
+          playTimingRef.current.startWall = performance.now();
+          playTimingRef.current.startVideo = restartAt;
+        } else {
+          v.pause();
+          return;
+        }
       }
       const t = smoothPosition();
       notifyPlayhead(t, true);
@@ -216,6 +234,10 @@ export function usePlayback(
     videoRef,
     currentTime,
     playing,
+    volume,
+    setVolume,
+    loop,
+    setLoop,
     subscribePlayhead,
     playOrPause,
     seek,

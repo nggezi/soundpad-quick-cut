@@ -1,5 +1,15 @@
 import { memo } from "react";
-import { IconFrameBack, IconFrameForward, IconPause, IconPlay, IconSecBack, IconSecForward } from "./Icons.js";
+import {
+  IconFrameBack,
+  IconFrameForward,
+  IconPause,
+  IconPlay,
+  IconRepeat,
+  IconSecBack,
+  IconSecForward,
+  IconVolume,
+  IconVolumeMute,
+} from "./Icons.js";
 
 interface Props {
   playing: boolean;
@@ -8,6 +18,10 @@ interface Props {
   onStepSecond: (dir: 1 | -1) => void;
   onHoldStart: (fn: () => void) => void;
   onHoldEnd: () => void;
+  loop: boolean;
+  onLoopChange: (loop: boolean) => void;
+  volume: number;
+  onVolumeChange: (volume: number) => void;
 }
 
 export const TransportBar = memo(function TransportBar({
@@ -17,9 +31,23 @@ export const TransportBar = memo(function TransportBar({
   onStepSecond,
   onHoldStart,
   onHoldEnd,
+  loop,
+  onLoopChange,
+  volume,
+  onVolumeChange,
 }: Props) {
   return (
     <div className="transport-bar">
+      <div className="transport-extra">
+        <button
+          className={"transport-btn loop-btn" + (loop ? " active" : "")}
+          onClick={() => onLoopChange(!loop)}
+          title="循环播放选区"
+        >
+          <IconRepeat size={15} />
+          <span>循环</span>
+        </button>
+      </div>
       <div className="transport-group">
         <button
           className="transport-btn"
@@ -67,6 +95,20 @@ export const TransportBar = memo(function TransportBar({
           <IconFrameForward size={15} />
           <span>帧</span>
         </button>
+      </div>
+      <div className="transport-extra transport-volume">
+        {volume <= 0.02 ? <IconVolumeMute size={15} /> : <IconVolume size={15} />}
+        <input
+          type="range"
+          min={0}
+          max={1}
+          step={0.02}
+          value={volume}
+          onChange={(e) => onVolumeChange(parseFloat(e.target.value))}
+          title="音量"
+          aria-label="音量"
+        />
+        <span className="volume-value">{Math.round(volume * 100)}%</span>
       </div>
     </div>
   );

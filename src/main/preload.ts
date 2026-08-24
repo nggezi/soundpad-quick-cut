@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
-import type { ExportOptions, ExportProgress } from "../shared/types.js";
+import type { ExportOptions, ExportProgress, SoundpadCategories } from "../shared/types.js";
 import type { SoundpadQuickCutApi } from "../shared/api.js";
 
 // Electron 28+ removed File.path; resolve dropped-file paths here via
@@ -39,11 +39,11 @@ document.addEventListener(
 const api: SoundpadQuickCutApi = {
   openVideo: () => ipcRenderer.invoke("dialog:openVideo"),
   saveAudio: (defaultName: string) => ipcRenderer.invoke("dialog:saveAudio", defaultName),
-  tempAudioPath: (fileName: string) => ipcRenderer.invoke("dialog:tempAudioPath", fileName),
   probe: (filePath: string) => ipcRenderer.invoke("ffmpeg:probe", filePath),
   waveform: (filePath: string, samples: number, durationHint?: number) =>
     ipcRenderer.invoke("ffmpeg:waveform", filePath, samples, durationHint),
   exportAudio: (opts: ExportOptions) => ipcRenderer.invoke("ffmpeg:export", opts),
+  cancelExport: () => ipcRenderer.invoke("ffmpeg:exportCancel"),
   onExportProgress: (cb) => {
     const handler = (_e: unknown, p: ExportProgress) => cb(p);
     ipcRenderer.on("ffmpeg:exportProgress", handler);
@@ -51,6 +51,8 @@ const api: SoundpadQuickCutApi = {
   },
   showInFolder: (filePath: string) => ipcRenderer.invoke("shell:showInFolder", filePath),
   addToSoundpad: (filePath: string, category?: string) => ipcRenderer.invoke("soundpad:add", filePath, category),
+  getSoundpadCategories: (): Promise<SoundpadCategories> => ipcRenderer.invoke("soundpad:categories"),
+  soundpadExportPath: (fileName: string) => ipcRenderer.invoke("soundpad:exportPath", fileName),
   onFileDropped: (cb: (paths: string[]) => void) => {
     onFileDrop = cb;
   },

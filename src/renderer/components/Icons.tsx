@@ -131,3 +131,23 @@ export const IconMusic = makeIcon(<>
   <circle cx="6" cy="18" r="3" />
   <circle cx="18" cy="16" r="3" />
 </>);
+export const IconRepeat = makeIcon(<>
+  <path d="m17 2 4 4-4 4" />
+  <path d="M3 11v-1a4 4 0 0 1 4-4h14" />
+  <path d="m7 22-4-4 4-4" />
+  <path d="M21 13v1a4 4 0 0 1-4 4H3" />
+</>);
+export const IconVolume = makeIcon(<>
+  <path d="M11 5 6 9H3v6h3l5 4z" />
+  <path d="M15.5 8.5a5 5 0 0 1 0 7" />
+  <path d="M18.5 5.5a9 9 0 0 1 0 13" />
+</>);
+export const IconVolumeMute = makeIcon(<>
+  <path d="M11 5 6 9H3v6h3l5 4z" />
+  <path d="m16 9 5 6" />
+  <path d="m21 9-5 6" />
+</>);
+export const IconX = makeIcon(<>
+  <path d="M6 6l12 12" />
+  <path d="M18 6 6 18" />
+</>);

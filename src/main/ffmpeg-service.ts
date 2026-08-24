@@ -7,6 +7,7 @@ import type {
   ExportProgress,
   ProbeResult,
   WaveformPoint,
+  WaveformResult,
 } from "../shared/types.js";
 
 // ========== Binary resolution ==========
@@ -105,7 +106,7 @@ export async function getWaveform(
   filePath: string,
   samples: number,
   durationHint?: number,
-): Promise<WaveformPoint[]> {
+): Promise<WaveformResult> {
   const targetSamples = clamp(Math.round(samples) || 4000, 256, 20000);
   const duration = Math.max(0, durationHint ?? 0);
 
@@ -139,18 +140,18 @@ export async function getWaveform(
     });
     child.on("error", (err) => {
       console.error("[waveform] spawn error:", err.message);
-      resolve([]);
+      resolve({ points: [], error: err.message });
     });
     child.on("close", (code) => {
       if (code !== 0) {
         console.error("[waveform] ffmpeg exit", code, ":", stderr.slice(0, 300));
-        resolve([]);
+        resolve({ points: [], error: stderr.slice(0, 200) || `ffmpeg 退出码 ${code}` });
         return;
       }
       const buf = Buffer.concat(chunks);
       const floats = new Float32Array(buf.buffer, buf.byteOffset, Math.floor(buf.byteLength / 4));
       if (floats.length === 0) {
-        resolve([]);
+        resolve({ points: [] });
         return;
       }
       const bucketSize = Math.max(1, Math.floor(floats.length / targetSamples));
@@ -167,12 +168,22 @@ export async function getWaveform(
         points.push({ t: i / sampleRate, min, max });
       }
       console.log("[waveform] OK, points:", points.length, "sr:", sampleRate);
-      resolve(points);
+      resolve({ points });
     });
   });
 }
 
 // ========== Export ==========
+
+let activeExportChild: ReturnType<typeof spawn> | null = null;
+let exportCancelled = false;
+
+export function cancelExport(): void {
+  if (activeExportChild) {
+    exportCancelled = true;
+    activeExportChild.kill();
+  }
+}
 
 export async function exportAudio(
   opts: ExportOptions,
@@ -203,6 +214,8 @@ export async function exportAudio(
 
   return new Promise((resolve, reject) => {
     const child = spawn(ffmpegPath, args, { windowsHide: true });
+    activeExportChild = child;
+    exportCancelled = false;
     let stderr = "";
     let pending = "";
     let lastMs = 0;
@@ -224,9 +237,15 @@ export async function exportAudio(
     });
     child.on("error", reject);
     child.on("close", (code) => {
+      if (activeExportChild === child) activeExportChild = null;
       if (code !== 0) {
-        onProgress({ percent: 0, done: true, error: `ffmpeg exited with code ${code}` });
-        reject(new Error(`ffmpeg exited with code ${code}: ${stderr.slice(-300)}`));
+        const cancelled = exportCancelled;
+        onProgress({
+          percent: 0,
+          done: true,
+          error: cancelled ? "导出已取消" : `ffmpeg exited with code ${code}`,
+        });
+        reject(new Error(cancelled ? "导出已取消" : `ffmpeg exited with code ${code}: ${stderr.slice(-300)}`));
         return;
       }
       onProgress({ percent: 100, done: true, outputPath });

@@ -1,11 +1,14 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import path from "node:path";
 import fs from "node:fs";
-import { exportAudio, getWaveform, probeMedia } from "./ffmpeg-service.js";
-import { addToSoundpad } from "./services/soundpad-api.js";
+import { cancelExport, exportAudio, getWaveform, probeMedia } from "./ffmpeg-service.js";
+import { addToSoundpad, getSoundpadCategories } from "./services/soundpad-api.js";
 import type { ExportOptions } from "../shared/types.js";
 
-const VIDEO_EXTENSIONS = ["mp4", "mkv", "mov", "avi", "webm", "flv", "wmv", "m4v", "mpg", "mpeg", "ts"];
+const MEDIA_EXTENSIONS = [
+  "mp4", "mkv", "mov", "avi", "webm", "flv", "wmv", "m4v", "mpg", "mpeg", "ts",
+  "mp3", "wav", "flac", "m4a", "aac", "ogg", "opus",
+];
 
 export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void {
   const focusedWindow = (): BrowserWindow | undefined =>
@@ -14,10 +17,10 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
   ipcMain.handle("dialog:openVideo", async () => {
     const win = focusedWindow();
     const options = {
-      title: "选择视频文件",
+      title: "选择视频或音频文件",
       properties: ["openFile" as const],
       filters: [
-        { name: "视频文件", extensions: VIDEO_EXTENSIONS },
+        { name: "媒体文件", extensions: MEDIA_EXTENSIONS },
         { name: "所有文件", extensions: ["*"] },
       ],
     };
@@ -39,34 +42,24 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     return result.canceled ? null : result.filePath;
   });
 
-  // Path in the OS temp folder for exports that go straight to Soundpad.
-  // The name is the user-facing clip name (e.g. "片段_01.wav"); we strip
-  // characters that are illegal in filenames or would break the pipe command,
-  // and append a numeric suffix if the file already exists.
-  ipcMain.handle("dialog:tempAudioPath", (_e, fileName: string) => {
-    const ext = (path.extname(fileName) || ".wav").toLowerCase();
-    const base = path.basename(fileName, ext).replace(/[\\/:*?"<>|\r\n\t]/g, "_").trim();
-    const name = base || "clip";
-    const dir = app.getPath("temp");
-    let candidate = path.join(dir, `${name}${ext}`);
-    let n = 1;
-    while (fs.existsSync(candidate)) {
-      candidate = path.join(dir, `${name}-${n}${ext}`);
-      n++;
-    }
-    return candidate;
-  });
-
   ipcMain.handle("ffmpeg:probe", async (_e, filePath: string) => probeMedia(filePath));
 
-  ipcMain.handle("ffmpeg:waveform", async (_e, filePath: string, samples: number, durationHint?: number) =>
-    getWaveform(filePath, samples, durationHint),
-  );
+  ipcMain.handle("ffmpeg:waveform", async (_e, filePath: string, samples: number, durationHint?: number) => {
+    try {
+      return await getWaveform(filePath, samples, durationHint);
+    } catch (err) {
+      return { points: [], error: (err as Error).message || "未知错误" };
+    }
+  });
 
   ipcMain.handle("ffmpeg:export", async (_e, opts: ExportOptions) => {
     return exportAudio(opts, (progress) => {
       focusedWindow()?.webContents.send("ffmpeg:exportProgress", progress);
     });
+  });
+
+  ipcMain.handle("ffmpeg:exportCancel", () => {
+    cancelExport();
   });
 
   ipcMain.handle("shell:showInFolder", async (_e, filePath: string) => {
@@ -76,4 +69,25 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
   ipcMain.handle("soundpad:add", async (_e, filePath: string, category?: string) =>
     addToSoundpad(filePath, category),
   );
+
+  ipcMain.handle("soundpad:categories", () => getSoundpadCategories());
+
+  // Destination for Soundpad-bound exports: the directory Soundpad already
+  // uses for its sounds (so the clip survives temp cleanup), falling back to a
+  // per-user folder if Soundpad has no sounds yet.
+  ipcMain.handle("soundpad:exportPath", async (_e, fileName: string) => {
+    const state = await getSoundpadCategories();
+    const dir = state.soundDir || path.join(app.getPath("documents"), "Soundpad Quick Cut");
+    fs.mkdirSync(dir, { recursive: true });
+    const ext = (path.extname(fileName) || ".wav").toLowerCase();
+    const base = path.basename(fileName, ext).replace(/[\\/:*?"<>|\r\n\t]/g, "_").trim();
+    const name = base || "clip";
+    let candidate = path.join(dir, `${name}${ext}`);
+    let n = 1;
+    while (fs.existsSync(candidate)) {
+      candidate = path.join(dir, `${name}-${n}${ext}`);
+      n++;
+    }
+    return candidate;
+  });
 }
