@@ -44,9 +44,11 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
 
   ipcMain.handle("ffmpeg:probe", async (_e, filePath: string) => probeMedia(filePath));
 
-  ipcMain.handle("ffmpeg:waveform", async (_e, filePath: string, samples: number, durationHint?: number) => {
+  ipcMain.handle(
+    "ffmpeg:waveform",
+    async (_e, filePath: string, samples: number, durationHint?: number, window?: { start: number; end: number }) => {
     try {
-      return await getWaveform(filePath, samples, durationHint);
+      return await getWaveform(filePath, samples, durationHint, window);
     } catch (err) {
       return { points: [], error: (err as Error).message || "未知错误" };
     }

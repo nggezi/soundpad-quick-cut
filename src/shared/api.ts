@@ -2,8 +2,10 @@ import type {
   ExportOptions,
   ExportProgress,
   ProbeResult,
+  RefinedWaveform,
   SoundpadCategories,
   SoundpadResult,
+  WaveformWindow,
   WaveformResult,
 } from "./types.js";
 
@@ -11,7 +13,7 @@ export interface SoundpadQuickCutApi {
   openVideo: () => Promise<string | null>;
   saveAudio: (defaultName: string) => Promise<string | null>;
   probe: (filePath: string) => Promise<ProbeResult>;
-  waveform: (filePath: string, samples: number, durationHint?: number) => Promise<WaveformResult>;
+  waveform: (filePath: string, samples: number, durationHint?: number, window?: WaveformWindow) => Promise<WaveformResult>;
   exportAudio: (opts: ExportOptions) => Promise<void>;
   cancelExport: () => Promise<void>;
   onExportProgress: (cb: (p: ExportProgress) => void) => () => void;

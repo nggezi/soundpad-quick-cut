@@ -6,6 +6,7 @@ import type {
   ExportOptions,
   ExportProgress,
   ProbeResult,
+  WaveformWindow,
   WaveformPoint,
   WaveformResult,
 } from "../shared/types.js";
@@ -106,9 +107,12 @@ export async function getWaveform(
   filePath: string,
   samples: number,
   durationHint?: number,
+  window?: WaveformWindow,
 ): Promise<WaveformResult> {
   const targetSamples = clamp(Math.round(samples) || 4000, 256, 20000);
-  const duration = Math.max(0, durationHint ?? 0);
+  const duration = window
+    ? Math.max(0, window.end - window.start)
+    : Math.max(0, durationHint ?? 0);
 
   // Aim for ~16 samples per waveform bucket. This keeps memory bounded on
   // long files (8kHz * hours would buffer hundreds of MB) while short clips
@@ -119,6 +123,7 @@ export async function getWaveform(
 
   const args = [
     "-nostdin",
+    ...(window ? ["-ss", window.start.toFixed(3), "-t", duration.toFixed(3)] : []),
     "-i", filePath,
     "-vn",
     "-ac", "1",
@@ -165,7 +170,7 @@ export async function getWaveform(
           if (v < min) min = v;
           if (v > max) max = v;
         }
-        points.push({ t: i / sampleRate, min, max });
+        points.push({ t: (window ? window.start : 0) + i / sampleRate, min, max });
       }
       console.log("[waveform] OK, points:", points.length, "sr:", sampleRate);
       resolve({ points });
@@ -210,6 +215,16 @@ export async function exportAudio(
   } else {
     args.push("-c:a", "libmp3lame", "-b:a", `${opts.mp3Bitrate ?? 192}k`);
   }
+  const filters: string[] = [];
+  if (opts.gainDb) filters.push(`volume=${opts.gainDb}dB`);
+  if (opts.fadeInMs && opts.fadeInMs > 0) {
+    filters.push(`afade=t=in:st=0:d=${(opts.fadeInMs / 1000).toFixed(3)}`);
+  }
+  if (opts.fadeOutMs && opts.fadeOutMs > 0) {
+    const st = Math.max(0, duration - opts.fadeOutMs / 1000);
+    filters.push(`afade=t=out:st=${st.toFixed(3)}:d=${(opts.fadeOutMs / 1000).toFixed(3)}`);
+  }
+  if (filters.length > 0) args.push("-af", filters.join(","));
   args.push("-progress", "pipe:1", outputPath);
 
   return new Promise((resolve, reject) => {

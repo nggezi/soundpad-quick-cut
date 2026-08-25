@@ -1,9 +1,11 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent, WheelEvent as ReactWheelEvent } from "react";
-import type { WaveformPoint } from "../../shared/types.js";
+import type { RefinedWaveform, WaveformPoint } from "../../shared/types.js";
+import { fmtTime } from "../lib/time.js";
 
 interface Props {
   points: WaveformPoint[];
+  refined: RefinedWaveform | null;
   duration: number;
   inPoint: number | null;
   outPoint: number | null;
@@ -12,6 +14,7 @@ interface Props {
   onSeek: (t: number) => void;
   onRegionChange: (start: number, end: number) => void;
   onZoomChange: (zoom: number) => void;
+  onRefine: (start: number, end: number) => void;
   onPlayhead: (cb: (t: number, playing: boolean) => void) => () => void;
 }
 
@@ -28,6 +31,7 @@ function cssVar(name: string, fallback: string): string {
 
 export const Waveform = memo(function Waveform({
   points,
+  refined,
   duration,
   inPoint,
   outPoint,
@@ -36,6 +40,7 @@ export const Waveform = memo(function Waveform({
   onSeek,
   onRegionChange,
   onZoomChange,
+  onRefine,
   onPlayhead,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -49,6 +54,9 @@ export const Waveform = memo(function Waveform({
   const handleOutRef = useRef<HTMLDivElement>(null);
   const markerInRef = useRef<HTMLDivElement>(null);
   const markerOutRef = useRef<HTMLDivElement>(null);
+  const hoverLineRef = useRef<HTMLDivElement>(null);
+  const hoverTimeRef = useRef<HTMLDivElement>(null);
+  const selDurationRef = useRef<HTMLDivElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
   const canvasSizeRef = useRef({ w: 0, h: 0 });
@@ -65,6 +73,8 @@ export const Waveform = memo(function Waveform({
   zm.current = zoom;
   const pts = useRef(points);
   pts.current = points;
+  const refinedRef = useRef(refined);
+  refinedRef.current = refined;
 
   // ---- View panning (via native scrollbar) ----
   const [viewStart, setViewStart] = useState(0);
@@ -79,6 +89,7 @@ export const Waveform = memo(function Waveform({
   vwRef.current = visWindow;
   const durRef = useRef(duration);
   durRef.current = duration;
+  const playingRef = useRef(false);
   const phRef = useRef(0);
 
   const playVsRef = useRef(0);
@@ -128,6 +139,20 @@ export const Waveform = memo(function Waveform({
     });
   }, [zoom, duration]);
 
+  // ---- Dynamic refinement: when paused and zoomed in, ask the parent for a
+  //      higher-resolution waveform covering the visible window. ----
+  useEffect(() => {
+    if (playingRef.current) return;
+    if (duration <= 0 || visWindow <= 0 || zoom <= 4) return;
+    const ref = refinedRef.current;
+    if (ref && ref.start <= clampedVS && ref.end >= clampedVS + visWindow) return;
+    const timer = setTimeout(() => {
+      if (playingRef.current) return;
+      onRefine(clampedVS, clampedVS + visWindow);
+    }, 280);
+    return () => clearTimeout(timer);
+  }, [clampedVS, visWindow, zoom, duration, onRefine]);
+
   // ---- Drag state ----
   const mode = useRef<"idle" | "maybeDrag" | "dragging">("idle");
   const dragStartX = useRef(0);
@@ -155,8 +180,8 @@ export const Waveform = memo(function Waveform({
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
 
-    const p = pts.current;
     const d = durRef.current;
+    const p = pts.current;
     if (loading) {
       ctx.fillStyle = cssVar("--accent", "#5b8cff");
       ctx.font = "13px sans-serif";
@@ -174,14 +199,18 @@ export const Waveform = memo(function Waveform({
 
     const vw = vwRef.current;
     if (vw <= 0) return;
+    const ref = refinedRef.current;
+    const useRefined =
+      ref && ref.points.length > 0 && ref.start <= vs && ref.end >= vs + vw;
+    const drawPts = useRefined ? ref.points : p;
     const ve = vs + vw;
-    const pl = p.length;
+    const pl = drawPts.length;
     const mid = h / 2;
     const bw = Math.max(1, w / pl - 0.5);
     const waveColor = cssVar("--accent", "#5b8cff");
     ctx.fillStyle = waveColor;
     for (let i = 0; i < pl; i++) {
-      const pt = p[i];
+      const pt = drawPts[i];
       if (pt.t < vs || pt.t > ve) continue;
       const amp = Math.max(0.02, Math.abs(pt.max - pt.min));
       ctx.fillRect(((pt.t - vs) / vw) * w, mid - amp * (h * 0.45), bw, amp * (h * 0.45) * 2);
@@ -282,6 +311,7 @@ export const Waveform = memo(function Waveform({
     show(handleOutRef.current, false);
     show(markerInRef.current, false);
     show(markerOutRef.current, false);
+    show(selDurationRef.current, false);
 
     if (w <= 0 || vw <= 0 || d <= 0) return;
     const ip = ipt.current;
@@ -301,6 +331,16 @@ export const Waveform = memo(function Waveform({
     if (ip !== null && op !== null) {
       const xIn = t2x(ip);
       const xOut = t2x(op);
+      show(selDurationRef.current, true);
+      const durLabel = selDurationRef.current;
+      if (durLabel) {
+        const text = `${(op - ip).toFixed(2)}s`;
+        if (durLabel.dataset.text !== text) {
+          durLabel.dataset.text = text;
+          durLabel.textContent = text;
+        }
+        durLabel.style.transform = `translateX(${(xIn + xOut) / 2 - 18}px)`;
+      }
       show(dimBeforeRef.current, true);
       setRect(dimBeforeRef.current, 0, xIn);
       show(selOverlayRef.current, true);
@@ -330,6 +370,7 @@ export const Waveform = memo(function Waveform({
   //      60fps. Pausing syncs the final view position back to React once. ----
   useEffect(() => {
     return onPlayhead((t, isPlaying) => {
+      playingRef.current = isPlaying;
       const d = durRef.current;
       const vw = vwRef.current;
       if (d <= 0 || vw <= 0) {
@@ -425,6 +466,26 @@ export const Waveform = memo(function Waveform({
     (e.currentTarget as HTMLElement).style.cursor = hitTest(e.clientX) ? "ew-resize" : "default";
   };
 
+  const onHoverMove = (e: ReactMouseEvent<HTMLDivElement>) => {
+    onHover(e);
+    const wrap = wrapRef.current;
+    const line = hoverLineRef.current;
+    const time = hoverTimeRef.current;
+    if (!wrap || !line || !time) return;
+    const r = wrap.getBoundingClientRect();
+    const x = e.clientX - r.left;
+    line.style.transform = `translateX(${x - 0.5}px)`;
+    line.style.opacity = "1";
+    time.textContent = fmtTime(pxToTime(e.clientX));
+    time.style.left = `${Math.max(2, Math.min(x - 30, r.width - 64))}px`;
+    time.style.opacity = "1";
+  };
+
+  const onHoverLeave = () => {
+    if (hoverLineRef.current) hoverLineRef.current.style.opacity = "0";
+    if (hoverTimeRef.current) hoverTimeRef.current.style.opacity = "0";
+  };
+
   const onMoveRef = useRef<(e: MouseEvent) => void>(() => {});
   onMoveRef.current = (e: MouseEvent) => {
     if (mode.current === "idle") return;
@@ -493,10 +554,13 @@ export const Waveform = memo(function Waveform({
         className="waveform-wrap"
         ref={wrapRef}
         onMouseDown={onMouseDown}
-        onMouseMove={onHover}
+        onMouseMove={onHoverMove}
+        onMouseLeave={onHoverLeave}
         onWheel={onWheel}
       >
         <canvas ref={canvasRef} />
+        <div ref={hoverLineRef} className="hover-line" />
+        <div ref={hoverTimeRef} className="hover-time" />
 
         <div className="region-overlay">
           <div ref={dimBeforeRef} className="dim" />
@@ -506,6 +570,7 @@ export const Waveform = memo(function Waveform({
           <div ref={handleOutRef} className="handle out" title="出点" />
           <div ref={markerInRef} className="marker in" />
           <div ref={markerOutRef} className="marker out" />
+          <div ref={selDurationRef} className="sel-duration" />
         </div>
 
         <div ref={playheadRef} className="playhead" />

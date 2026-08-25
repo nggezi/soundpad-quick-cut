@@ -1,13 +1,14 @@
 import { memo } from "react";
-import { IconFile, IconPlus, IconVideo, IconWave } from "./Icons.js";
+import { IconFile, IconHelp, IconPlus, IconVideo, IconWave } from "./Icons.js";
 
 interface Props {
   fileName: string | null;
   materialCount: number;
   onOpen: () => void;
+  onHelp: () => void;
 }
 
-export const TopBar = memo(function TopBar({ fileName, materialCount, onOpen }: Props) {
+export const TopBar = memo(function TopBar({ fileName, materialCount, onOpen, onHelp }: Props) {
   return (
     <div className="topbar">
       <div className="brand">
@@ -20,6 +21,9 @@ export const TopBar = memo(function TopBar({ fileName, materialCount, onOpen }: 
         </div>
       </div>
       <div className="topbar-actions">
+        <button className="icon-btn help-btn" onClick={onHelp} title="使用引导">
+          <IconHelp size={15} />
+        </button>
         {materialCount > 0 && (
           <span className="mat-count">
             <IconVideo size={13} />

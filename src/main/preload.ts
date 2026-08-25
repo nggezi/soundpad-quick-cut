@@ -40,8 +40,8 @@ const api: SoundpadQuickCutApi = {
   openVideo: () => ipcRenderer.invoke("dialog:openVideo"),
   saveAudio: (defaultName: string) => ipcRenderer.invoke("dialog:saveAudio", defaultName),
   probe: (filePath: string) => ipcRenderer.invoke("ffmpeg:probe", filePath),
-  waveform: (filePath: string, samples: number, durationHint?: number) =>
-    ipcRenderer.invoke("ffmpeg:waveform", filePath, samples, durationHint),
+  waveform: (filePath: string, samples: number, durationHint?: number, window?: { start: number; end: number }) =>
+    ipcRenderer.invoke("ffmpeg:waveform", filePath, samples, durationHint, window),
   exportAudio: (opts: ExportOptions) => ipcRenderer.invoke("ffmpeg:export", opts),
   cancelExport: () => ipcRenderer.invoke("ffmpeg:exportCancel"),
   onExportProgress: (cb) => {

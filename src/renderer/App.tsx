@@ -13,6 +13,7 @@ import { TimelineControls } from "./components/TimelineControls.js";
 import { ExportBar, CATEGORIES } from "./components/ExportBar.js";
 import { Toast } from "./components/Toast.js";
 import { Waveform } from "./components/Waveform.js";
+import { Onboarding } from "./components/Onboarding.js";
 import { IconWave } from "./components/Icons.js";
 import { baseName, fileName, isMediaFile } from "./lib/file.js";
 import type { ExportFormat } from "../shared/types.js";
@@ -23,6 +24,30 @@ const getStoredFormat = (): ExportFormat => {
 };
 
 const defaultSoundName = (filePath: string): string => baseName(filePath).slice(0, 5);
+
+const ONBOARDING_KEY = "soundpad-quick-cut:onboarding:v1";
+const FX_KEY = "soundpad-quick-cut:fx";
+
+interface ExportFx {
+  fadeInMs: number;
+  fadeOutMs: number;
+  gainDb: number;
+}
+
+const getStoredFx = (): ExportFx => {
+  try {
+    const raw = localStorage.getItem(FX_KEY);
+    if (!raw) return { fadeInMs: 0, fadeOutMs: 0, gainDb: 0 };
+    const parsed = JSON.parse(raw) as Partial<ExportFx>;
+    return {
+      fadeInMs: Math.max(0, Number(parsed.fadeInMs) || 0),
+      fadeOutMs: Math.max(0, Number(parsed.fadeOutMs) || 0),
+      gainDb: Math.max(-30, Math.min(30, Number(parsed.gainDb) || 0)),
+    };
+  } catch {
+    return { fadeInMs: 0, fadeOutMs: 0, gainDb: 0 };
+  }
+};
 
 export default function App() {
   const {
@@ -35,6 +60,14 @@ export default function App() {
     switchMaterial,
     patchActive,
     clearSelection,
+    addClip,
+    removeClip,
+    selectClip,
+    refineWaveform,
+    undo,
+    redo,
+    canUndo,
+    canRedo,
   } = useMaterials();
 
   const { toast, showToast } = useToast();
@@ -47,6 +80,10 @@ export default function App() {
   const [soundName, setSoundName] = useState("");
   const [soundpadConnected, setSoundpadConnected] = useState(false);
   const [spCategories, setSpCategories] = useState<string[]>([]);
+  const [fx, setFx] = useState<ExportFx>(getStoredFx);
+  const [lastExportPath, setLastExportPath] = useState<string | null>(null);
+  const [previewingExport, setPreviewingExport] = useState(false);
+  const [showGuide, setShowGuide] = useState(() => !localStorage.getItem(ONBOARDING_KEY));
 
   const videoUrl = active?.url ?? null;
   const probe = active?.probe ?? null;
@@ -65,8 +102,12 @@ export default function App() {
   formatRef.current = exportFormat;
   const soundNameRef = useRef(soundName);
   soundNameRef.current = soundName;
-  // Per-material export counter, so clips from the same video get _01, _02...
-  const exportCountRef = useRef(new Map<string, number>());
+  const fxRef = useRef(fx);
+  fxRef.current = fx;
+  const previewAudioRef = useRef<HTMLAudioElement | null>(null);
+  const batchRef = useRef<{ total: number; current: number } | null>(null);
+  const lastExportPathRef = useRef(lastExportPath);
+  lastExportPathRef.current = lastExportPath;
 
   // Load Soundpad categories once on mount (and whenever the user re-checks).
   useEffect(() => {
@@ -101,9 +142,19 @@ export default function App() {
 
   useEffect(() => {
     return window.api.onExportProgress((p) => {
+      if (batchRef.current) {
+        const b = batchRef.current;
+        setProgress(Math.min(99, ((b.current + p.percent / 100) / b.total) * 100));
+        return;
+      }
       setProgress(p.percent);
       if (p.done) setExporting(false);
     });
+  }, []);
+
+  const finishGuide = useCallback(() => {
+    localStorage.setItem(ONBOARDING_KEY, "1");
+    setShowGuide(false);
   }, []);
 
   const handleLoad = useCallback(
@@ -125,6 +176,14 @@ export default function App() {
       playback.seek(0);
     },
     [switchMaterial, playback.seek],
+  );
+
+  const handleSelectClip = useCallback(
+    (idx: number, clipId: string) => {
+      selectClip(idx, clipId);
+      playback.seek(0);
+    },
+    [selectClip, playback.seek],
   );
 
   const handleCancelExport = useCallback(() => {
@@ -188,9 +247,53 @@ export default function App() {
     [patchActive],
   );
 
+  const nudgeIn = useCallback(
+    (dir: 1 | -1) => {
+      const cur = activeRef.current;
+      const v = playback.videoRef.current;
+      if (!cur) return;
+      const base = cur.inPoint ?? v?.currentTime ?? 0;
+      const t = Math.max(0, Math.min(cur.duration || base, base + dir / (cur.probe?.fps ?? 30)));
+      patchActive({
+        inPoint: t,
+        outPoint: cur.outPoint !== null && t > cur.outPoint ? null : cur.outPoint,
+      });
+    },
+    [playback.videoRef, patchActive],
+  );
+
+  const nudgeOut = useCallback(
+    (dir: 1 | -1) => {
+      const cur = activeRef.current;
+      const v = playback.videoRef.current;
+      if (!cur) return;
+      const base = cur.outPoint ?? v?.currentTime ?? 0;
+      const t = Math.max(0, Math.min(cur.duration || base, base + dir / (cur.probe?.fps ?? 30)));
+      patchActive({
+        outPoint: t,
+        inPoint: cur.inPoint !== null && t < cur.inPoint ? null : cur.inPoint,
+      });
+    },
+    [playback.videoRef, patchActive],
+  );
+
+  const jumpStart = useCallback(() => playback.seek(0), [playback.seek]);
+  const jumpEnd = useCallback(
+    () => playback.seek(selectionRef.current.duration),
+    [playback.seek],
+  );
+
   const handleFormatChange = useCallback((f: ExportFormat) => {
     setExportFormat(f);
     localStorage.setItem("exportFormat", f);
+  }, []);
+
+  const handleFxChange = useCallback((patchData: Partial<ExportFx>) => {
+    setFx((prev) => {
+      const next = { ...prev, ...patchData };
+      localStorage.setItem(FX_KEY, JSON.stringify(next));
+      return next;
+    });
   }, []);
 
   const doExport = useCallback(
@@ -201,11 +304,12 @@ export default function App() {
       const o = cur.outPoint;
       const cat = toSoundpad ? categoryRef.current : "";
       const f = formatRef.current;
-      const count = (exportCountRef.current.get(cur.path) ?? 0) + 1;
+      const clipIndex = cur.clips.findIndex((c) => c.inPoint === i && c.outPoint === o);
+      const count = clipIndex >= 0 ? clipIndex + 1 : cur.clips.length + 1;
       const namePart = (soundNameRef.current.trim() || defaultSoundName(cur.path)).slice(0, 40);
       const suffix = `_${String(count).padStart(2, "0")}`;
       const fileName = `${namePart}${suffix}.${f}`;
-      // Export to Soundpad: use a temp file so no save dialog interrupts the flow.
+      // Export to Soundpad: write into Soundpad's sounds folder.
       // Plain file export: let the user pick the destination.
       const outPath = toSoundpad
         ? await window.api.soundpadExportPath(fileName)
@@ -224,10 +328,13 @@ export default function App() {
           mp3Bitrate: 192,
           wavSampleRate: 44100,
           wavChannels: 2,
+          fadeInMs: fxRef.current.fadeInMs,
+          fadeOutMs: fxRef.current.fadeOutMs,
+          gainDb: fxRef.current.gainDb,
         });
+        setLastExportPath(outPath);
         if (toSoundpad) {
           const sp = await window.api.addToSoundpad(outPath, cat);
-          if (sp.ok) exportCountRef.current.set(cur.path, count);
           showToast(
             sp.ok
               ? `已导出并添加至 Soundpad [${cat}]`
@@ -236,7 +343,6 @@ export default function App() {
           );
         } else {
           window.api.showInFolder(outPath);
-          exportCountRef.current.set(cur.path, count);
           showToast("导出成功", "success");
         }
       } catch (err) {
@@ -251,6 +357,87 @@ export default function App() {
   const handleExportToSp = useCallback(() => void doExport(true), [doExport]);
   const handleExportFile = useCallback(() => void doExport(false), [doExport]);
 
+  const doExportAll = useCallback(async () => {
+    const cur = activeRef.current;
+    if (!cur || cur.clips.length === 0) return;
+    const cat = categoryRef.current;
+    const f = formatRef.current;
+    const namePart = (soundNameRef.current.trim() || defaultSoundName(cur.path)).slice(0, 40);
+    const total = cur.clips.length;
+    setExporting(true);
+    setProgress(0);
+    batchRef.current = { total, current: 0 };
+    const errors: string[] = [];
+    let okCount = 0;
+
+    for (let idx = 0; idx < total; idx++) {
+      const clip = cur.clips[idx];
+      const fileName = `${namePart}_${String(idx + 1).padStart(2, "0")}.${f}`;
+      try {
+        const outPath = await window.api.soundpadExportPath(fileName);
+        await window.api.exportAudio({
+          inputPath: cur.path,
+          start: clip.inPoint,
+          end: clip.outPoint,
+          outputPath: outPath,
+          format: f,
+          mp3Bitrate: 192,
+          wavSampleRate: 44100,
+          wavChannels: 2,
+          fadeInMs: fxRef.current.fadeInMs,
+          fadeOutMs: fxRef.current.fadeOutMs,
+          gainDb: fxRef.current.gainDb,
+        });
+        const sp = await window.api.addToSoundpad(outPath, cat);
+        if (sp.ok) {
+          okCount++;
+          setLastExportPath(outPath);
+        } else {
+          errors.push(`${idx + 1}: ${sp.error}`);
+        }
+      } catch (err) {
+        const msg = (err as Error).message;
+        if (msg === "导出已取消") {
+          batchRef.current = null;
+          setExporting(false);
+          showToast("批量导出已取消", "success");
+          return;
+        }
+        errors.push(`${idx + 1}: ${msg}`);
+      }
+      batchRef.current = { total, current: idx + 1 };
+      setProgress(Math.round(((idx + 1) / total) * 100));
+    }
+
+    batchRef.current = null;
+    setExporting(false);
+    setProgress(100);
+    if (errors.length === 0) {
+      showToast(`已导出 ${okCount} 个片段到 Soundpad [${cat}]`, "success");
+    } else if (okCount > 0) {
+      showToast(`完成 ${okCount}/${total}，失败: ${errors.join("；")}`, "success");
+    } else {
+      showToast(`导出失败: ${errors.join("；")}`, "error");
+    }
+  }, [showToast]);
+
+  const handlePreviewExport = useCallback(() => {
+    const path = lastExportPathRef.current;
+    if (!path) return;
+    const audio = previewAudioRef.current ?? new Audio();
+    previewAudioRef.current = audio;
+    if (!audio.src) audio.src = "file:///" + path.replace(/\\/g, "/");
+    if (audio.paused) {
+      void audio.play();
+      setPreviewingExport(true);
+      audio.onended = () => setPreviewingExport(false);
+      audio.onpause = () => setPreviewingExport(false);
+    } else {
+      audio.pause();
+      setPreviewingExport(false);
+    }
+  }, []);
+
   useKeyboardShortcuts({
     onClearSelection: clearSelection,
     onExport: handleExportFile,
@@ -260,6 +447,13 @@ export default function App() {
     onPreview: playback.previewSelection,
     onStepFrame: playback.stepFrame,
     onStepSecond: playback.stepSecond,
+    onAddClip: addClip,
+    onUndo: undo,
+    onRedo: redo,
+    onNudgeIn: nudgeIn,
+    onNudgeOut: nudgeOut,
+    onJumpStart: jumpStart,
+    onJumpEnd: jumpEnd,
   });
 
   const zoomOut = useCallback(
@@ -280,6 +474,7 @@ export default function App() {
         fileName={videoUrl && active ? fileName(active.path) : null}
         materialCount={materials.length}
         onOpen={handleOpen}
+        onHelp={() => setShowGuide(true)}
       />
       <div className="workspace">
         {materials.length > 0 && (
@@ -288,6 +483,8 @@ export default function App() {
             activeIdx={activeIdx}
             onSelect={handleSelect}
             onRemove={removeMaterial}
+            onSelectClip={handleSelectClip}
+            onRemoveClip={removeClip}
           />
         )}
         <div className="content">
@@ -325,6 +522,7 @@ export default function App() {
                 />
                 <Waveform
                   points={active.waveform}
+                  refined={active.refined}
                   duration={duration}
                   inPoint={inPoint}
                   outPoint={outPoint}
@@ -333,6 +531,7 @@ export default function App() {
                   onSeek={playback.seek}
                   onRegionChange={handleRegionChange}
                   onZoomChange={setWaveformZoom}
+                  onRefine={refineWaveform}
                   onPlayhead={playback.subscribePlayhead}
                 />
                 <TimelineControls
@@ -346,6 +545,12 @@ export default function App() {
                   onZoomOut={zoomOut}
                   onZoomIn={zoomIn}
                   onZoomReset={zoomReset}
+                  onAddClip={addClip}
+                  clipsCount={active.clips.length}
+                  onUndo={undo}
+                  onRedo={redo}
+                  canUndo={canUndo}
+                  canRedo={canRedo}
                 />
               </div>
               <ExportBar
@@ -355,22 +560,34 @@ export default function App() {
                 categories={spCategories}
                 soundpadConnected={soundpadConnected}
                 format={exportFormat}
+                clipsCount={active.clips.length}
                 exporting={exporting}
                 progress={progress}
                 waveformLoading={waveformLoading}
                 canExport={canExport}
+                fadeInMs={fx.fadeInMs}
+                fadeOutMs={fx.fadeOutMs}
+                gainDb={fx.gainDb}
+                lastExportPath={lastExportPath}
+                previewingExport={previewingExport}
                 onCategoryChange={setCategory}
                 onFormatChange={handleFormatChange}
                 onSoundNameChange={setSoundName}
                 onExportToSoundpad={handleExportToSp}
+                onExportAllToSoundpad={doExportAll}
                 onExportFile={handleExportFile}
                 onCancelExport={handleCancelExport}
+                onFadeInChange={(v) => handleFxChange({ fadeInMs: v })}
+                onFadeOutChange={(v) => handleFxChange({ fadeOutMs: v })}
+                onGainChange={(v) => handleFxChange({ gainDb: v })}
+                onPreviewExport={handlePreviewExport}
               />
             </>
           )}
         </div>
       </div>
       {toast && <Toast toast={toast} />}
+      {showGuide && <Onboarding onFinish={finishGuide} />}
       {dragOver && (
         <div className="drag-overlay">
           <div className="drag-overlay-content">

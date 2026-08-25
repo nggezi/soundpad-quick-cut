@@ -26,6 +26,23 @@ export interface WaveformResult {
   error?: string;
 }
 
+export interface WaveformWindow {
+  start: number;
+  end: number;
+}
+
+export interface RefinedWaveform {
+  start: number;
+  end: number;
+  points: WaveformPoint[];
+}
+
+export interface Clip {
+  id: string;
+  inPoint: number;
+  outPoint: number;
+}
+
 export type ExportFormat = "wav" | "mp3";
 
 export interface ExportOptions {
@@ -39,6 +56,10 @@ export interface ExportOptions {
   // wav options
   wavSampleRate?: number; // e.g. 44100
   wavChannels?: number; // 1 or 2
+  // audio effects
+  fadeInMs?: number;
+  fadeOutMs?: number;
+  gainDb?: number;
 }
 
 export interface ExportProgress {
@@ -63,7 +84,7 @@ export type IpcChannels = {
   "dialog:openVideo": () => string | null;
   "dialog:saveAudio": (defaultName: string) => string | null;
   "ffmpeg:probe": (filePath: string) => ProbeResult;
-  "ffmpeg:waveform": (filePath: string, samples: number, durationHint?: number) => WaveformResult;
+  "ffmpeg:waveform": (filePath: string, samples: number, durationHint?: number, window?: WaveformWindow) => WaveformResult;
   "ffmpeg:export": (opts: ExportOptions) => void;
   "ffmpeg:exportCancel": () => void;
   "ffmpeg:exportProgress": (cb: (p: ExportProgress) => void) => void;

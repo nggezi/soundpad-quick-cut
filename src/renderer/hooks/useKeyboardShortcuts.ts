@@ -9,6 +9,13 @@ export interface ShortcutHandlers {
   onPreview: () => void;
   onStepFrame: (dir: 1 | -1) => void;
   onStepSecond: (dir: 1 | -1) => void;
+  onAddClip: () => void;
+  onUndo: () => void;
+  onRedo: () => void;
+  onNudgeIn: (dir: 1 | -1) => void;
+  onNudgeOut: (dir: 1 | -1) => void;
+  onJumpStart: () => void;
+  onJumpEnd: () => void;
 }
 
 export function useKeyboardShortcuts(handlers: ShortcutHandlers): void {
@@ -24,6 +31,17 @@ export function useKeyboardShortcuts(handlers: ShortcutHandlers): void {
         h.onClearSelection();
         return;
       }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
+        e.preventDefault();
+        if (e.shiftKey) h.onRedo();
+        else h.onUndo();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") {
+        e.preventDefault();
+        h.onRedo();
+        return;
+      }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "e") {
         e.preventDefault();
         h.onExport();
@@ -34,11 +52,26 @@ export function useKeyboardShortcuts(handlers: ShortcutHandlers): void {
           e.preventDefault();
           h.onPlayPause();
           break;
+        case "a":
+          h.onAddClip();
+          break;
         case "i":
           h.onInPoint();
           break;
         case "o":
           h.onOutPoint();
+          break;
+        case "[":
+          e.shiftKey ? h.onNudgeOut(-1) : h.onNudgeIn(-1);
+          break;
+        case "]":
+          e.shiftKey ? h.onNudgeOut(1) : h.onNudgeIn(1);
+          break;
+        case "home":
+          h.onJumpStart();
+          break;
+        case "end":
+          h.onJumpEnd();
           break;
         case "arrowleft":
           e.shiftKey ? h.onStepSecond(-1) : h.onStepFrame(-1);

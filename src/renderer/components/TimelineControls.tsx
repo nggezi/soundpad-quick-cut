@@ -3,8 +3,11 @@ import {
   IconEar,
   IconInPoint,
   IconOutPoint,
+  IconPlus,
+  IconRedo,
   IconReset,
   IconScissors,
+  IconUndo,
   IconZoomIn,
   IconZoomOut,
 } from "./Icons.js";
@@ -20,6 +23,12 @@ interface Props {
   onZoomOut: () => void;
   onZoomIn: () => void;
   onZoomReset: () => void;
+  onAddClip: () => void;
+  clipsCount: number;
+  onUndo: () => void;
+  onRedo: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
 }
 
 export const TimelineControls = memo(function TimelineControls({
@@ -33,6 +42,12 @@ export const TimelineControls = memo(function TimelineControls({
   onZoomOut,
   onZoomIn,
   onZoomReset,
+  onAddClip,
+  clipsCount,
+  onUndo,
+  onRedo,
+  canUndo,
+  canRedo,
 }: Props) {
   return (
     <div className="controls">
@@ -58,8 +73,20 @@ export const TimelineControls = memo(function TimelineControls({
           <IconScissors size={15} />
           清除选区
         </button>
+        <button className="add-clip-btn" onClick={onAddClip} disabled={inPoint === null || outPoint === null}>
+          <IconPlus size={15} />
+          添加片段
+          {clipsCount > 0 && <span className="clip-count">{clipsCount}</span>}
+          <span className="kbd">A</span>
+        </button>
       </div>
       <div className="controls-right">
+        <button className="icon-btn" onClick={onUndo} disabled={!canUndo} title="撤销 (Ctrl+Z)">
+          <IconUndo size={15} />
+        </button>
+        <button className="icon-btn" onClick={onRedo} disabled={!canRedo} title="重做 (Ctrl+Shift+Z)">
+          <IconRedo size={15} />
+        </button>
         <button className="icon-btn" onClick={onZoomOut} disabled={zoom <= 1} title="缩小">
           <IconZoomOut size={15} />
         </button>

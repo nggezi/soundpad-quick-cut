@@ -151,3 +151,16 @@ export const IconX = makeIcon(<>
   <path d="M6 6l12 12" />
   <path d="M18 6 6 18" />
 </>);
+export const IconUndo = makeIcon(<>
+  <path d="M9 14 4 9l5-5" />
+  <path d="M4 9h10a6 6 0 0 1 0 12h-3" />
+</>);
+export const IconRedo = makeIcon(<>
+  <path d="m15 14 5-5-5-5" />
+  <path d="M20 9H10a6 6 0 0 0 0 12h3" />
+</>);
+export const IconHelp = makeIcon(<>
+  <circle cx="12" cy="12" r="9" />
+  <path d="M9.5 9a2.5 2.5 0 1 1 3.7 2.2c-.8.4-1.2 1-1.2 1.8" />
+  <path d="M12 17h.01" />
+</>);
